@@ -1012,8 +1012,8 @@ export default function App() {
               ) : characters.map(char => {
                 const isOnline = presence.some(p => p.id === char.id && (currentTime - p.lastActive < 120000));
                 return (
-                  <div key={char.id} onClick={() => { if (char.id !== profile.id) { setInteractUser(char); setEditPointsAmount(char.points || 0); } }}
-                    className={`flex items-center justify-between p-3 rounded-lg border border-stone-800 shadow-sm transition-colors ${char.id !== profile.id ? 'bg-stone-950/50 hover:bg-stone-800 cursor-pointer' : 'bg-stone-950/30 opacity-70 cursor-default'}`}>
+                  <div key={char.id} onClick={() => { setInteractUser(char); setEditPointsAmount(char.points || 0); }}
+                    className={`flex items-center justify-between p-3 rounded-lg border border-stone-800 shadow-sm transition-colors bg-stone-950/50 hover:bg-stone-800 cursor-pointer`}>
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="relative shrink-0">
                         <img src={char.avatar} alt="avatar" className="w-10 h-10 rounded-md object-cover border border-stone-700 bg-stone-900" />
@@ -1465,8 +1465,8 @@ export default function App() {
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {usersInRoom.map(p => (
-              <button key={p.id} onClick={() => { if (p.id !== profile.id) { setInteractUser(p); setEditPointsAmount(p.points || 0); } }} disabled={p.id === profile.id}
-                className={`w-full flex items-center justify-between p-3 rounded-lg text-left transition-colors border border-transparent ${p.id === profile.id ? 'opacity-50 cursor-default' : 'hover:bg-stone-800 hover:border-stone-700 cursor-pointer'}`}>
+              <button key={p.id} onClick={() => { setInteractUser(p); setEditPointsAmount(p.points || 0); }}
+                className={`w-full flex items-center justify-between p-3 rounded-lg text-left transition-colors border border-transparent hover:bg-stone-800 hover:border-stone-700 cursor-pointer`}>
                 <div className="flex items-center gap-3 min-w-0">
                   <img src={p.avatar} alt="avatar" className="w-8 h-8 rounded-md object-cover bg-stone-950 border border-stone-800 shadow-inner shrink-0" />
                   <div className="min-w-0">
@@ -1530,35 +1530,41 @@ export default function App() {
               )}
 
               <div className="pt-4 space-y-4 border-t border-stone-800">
-                <button onClick={() => { setWhisperTarget(interactUser); setInteractUser(null); }}
-                  className="w-full flex items-center justify-center gap-2 bg-fuchsia-900/50 hover:bg-fuchsia-800/50 text-fuchsia-300 border border-fuchsia-900/50 py-2 rounded-lg transition-colors">
-                  <MessageSquare className="w-4 h-4" /> Whisper Privately
-                </button>
-                
-                <div className="bg-stone-950/50 p-3 rounded-lg border border-stone-800 space-y-3">
-                   <div className="text-xs text-stone-500 uppercase tracking-widest font-bold">Roleplay & Actions</div>
-                   <div className="flex gap-2">
-                     <input 
-                       type="text" 
-                       value={customAction} 
-                       onChange={e => setCustomAction(e.target.value)} 
-                       placeholder="e.g. steal from, charm, intimidate..."
-                       className="flex-1 bg-stone-900 border border-stone-700 p-2 rounded text-sm text-stone-200 focus:border-indigo-500 outline-none placeholder-stone-600"
-                     />
-                     <button 
-                       onClick={() => handleAction('custom')}
-                       disabled={!customAction.trim()}
-                       className="bg-indigo-900/50 hover:bg-indigo-800/50 text-indigo-300 px-4 py-2 rounded text-sm transition-colors border border-indigo-900/50 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed font-bold"
-                     >
-                       Roll!
-                     </button>
-                   </div>
-                   <div className="grid grid-cols-3 gap-2">
-                     <button onClick={() => handleAction('bow')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Bow</button>
-                     <button onClick={() => handleAction('cheer')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Cheer</button>
-                     <button onClick={() => handleAction('slap')} className="bg-orange-900/30 hover:bg-orange-900/50 text-orange-400 py-2 rounded-lg text-sm transition-colors border border-orange-900/50 shadow-sm">Slap</button>
-                   </div>
-                </div>
+                {interactUser.id !== profile.id ? (
+                  <>
+                    <button onClick={() => { setWhisperTarget(interactUser); setInteractUser(null); }}
+                      className="w-full flex items-center justify-center gap-2 bg-fuchsia-900/50 hover:bg-fuchsia-800/50 text-fuchsia-300 border border-fuchsia-900/50 py-2 rounded-lg transition-colors">
+                      <MessageSquare className="w-4 h-4" /> Whisper Privately
+                    </button>
+                    
+                    <div className="bg-stone-950/50 p-3 rounded-lg border border-stone-800 space-y-3">
+                       <div className="text-xs text-stone-500 uppercase tracking-widest font-bold">Roleplay & Actions</div>
+                       <div className="flex gap-2">
+                         <input 
+                           type="text" 
+                           value={customAction} 
+                           onChange={e => setCustomAction(e.target.value)} 
+                           placeholder="e.g. steal from, charm, intimidate..."
+                           className="flex-1 bg-stone-900 border border-stone-700 p-2 rounded text-sm text-stone-200 focus:border-indigo-500 outline-none placeholder-stone-600"
+                         />
+                         <button 
+                           onClick={() => handleAction('custom')}
+                           disabled={!customAction.trim()}
+                           className="bg-indigo-900/50 hover:bg-indigo-800/50 text-indigo-300 px-4 py-2 rounded text-sm transition-colors border border-indigo-900/50 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed font-bold"
+                         >
+                           Roll!
+                         </button>
+                       </div>
+                       <div className="grid grid-cols-3 gap-2">
+                         <button onClick={() => handleAction('bow')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Bow</button>
+                         <button onClick={() => handleAction('cheer')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Cheer</button>
+                         <button onClick={() => handleAction('slap')} className="bg-orange-900/30 hover:bg-orange-900/50 text-orange-400 py-2 rounded-lg text-sm transition-colors border border-orange-900/50 shadow-sm">Slap</button>
+                       </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-stone-500 italic text-sm py-4">This is you. Looking good!</div>
+                )}
               </div>
             </div>
           </div>
