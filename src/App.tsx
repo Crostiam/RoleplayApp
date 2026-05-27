@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Send, Map, Swords, Crown, Beer, TreePine, LogOut, Scroll, Users, X, MessageSquare, Plus, Trash2, Book, Flame, Edit, Mail, ZoomIn, ZoomOut, Maximize, Move, Clock, Feather, Minus, Maximize2, Pin } from 'lucide-react';
+import { Shield, Send, Map, Swords, Crown, Beer, TreePine, LogOut, Scroll, Users, X, MessageSquare, Plus, Trash2, Book, Flame, Edit, Mail, ZoomIn, ZoomOut, Maximize, Move, Clock, Feather, Minus, Maximize2, Pin, Sparkles } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, doc, setDoc, deleteDoc, getDoc, updateDoc } from 'firebase/firestore';
@@ -139,6 +139,7 @@ export default function App() {
   const [newMessage, setNewMessage] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [isPinningNextMessage, setIsPinningNextMessage] = useState(false);
+  const [isActionMessage, setIsActionMessage] = useState(false);
   
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
@@ -745,11 +746,20 @@ export default function App() {
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() && !attachedImage) return;
+
+    let msgText = newMessage.trim();
+    let type = isActionMessage ? 'action' : 'chat';
+
+    if (msgText.toLowerCase().startsWith('/me ')) {
+      msgText = msgText.substring(4).trim();
+      type = 'action';
+    }
+
     if (whisperTarget) {
-      await sendMessage(newMessage, 'whisper');
+      await sendMessage(msgText, 'whisper');
       setNewMessage(''); setWhisperTarget(null);
     } else {
-      await sendMessage(newMessage, 'chat');
+      await sendMessage(msgText, type);
       setNewMessage('');
     }
   };
@@ -1328,6 +1338,9 @@ export default function App() {
                            {msg.type === 'roll' ? msg.text.substring(msg.text.indexOf('\n') + 1).trim() : msg.text}
                          </div>
                       )}
+                      {msg.imageUrl && (
+                         <img src={msg.imageUrl} alt="action attached" className="mt-3 max-w-full rounded-lg border border-stone-700/50 shadow-sm" />
+                      )}
                     </span>
                   </div>
                 );
@@ -1403,15 +1416,19 @@ export default function App() {
                 </div>
               )}
               <div className="relative flex items-center w-full gap-2">
+                <button type="button" onClick={() => setIsActionMessage(!isActionMessage)} title="Toggle Roleplay Action (/me)"
+                   className={`p-3 rounded-xl transition-colors shadow-inner flex shrink-0 items-center justify-center ${isActionMessage ? 'bg-indigo-900/50 text-indigo-300 border border-indigo-500' : 'bg-stone-950 text-stone-500 border border-stone-700 hover:text-indigo-400'}`}>
+                   <Sparkles className="w-5 h-5" />
+                </button>
                 <button type="button" onClick={() => setIsPinningNextMessage(!isPinningNextMessage)} title="Pin Message Permanently"
                    className={`p-3 rounded-xl transition-colors shadow-inner flex shrink-0 items-center justify-center ${isPinningNextMessage ? 'bg-amber-600 text-stone-900 border border-amber-500' : 'bg-stone-950 text-stone-500 border border-stone-700 hover:text-amber-500'}`}>
                    <Pin className="w-5 h-5" />
                 </button>
                 <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onPaste={handlePaste}
-                  placeholder={whisperTarget ? `Secretly tell ${whisperTarget.name}...` : `Speak in ${activeRoom === 'main-town' ? 'Main Town' : rooms.find(r => r.id === activeRoom)?.name || 'the realm'}... (Ctrl+V to paste image)`}
-                  className={`w-full bg-stone-950 border text-stone-200 py-4 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner ${whisperTarget ? 'border-fuchsia-800 placeholder-fuchsia-800/50 focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500/50' : 'border-stone-700 placeholder-stone-600 focus:border-amber-600 focus:ring-1 focus:ring-amber-600/50'}`} />
+                  placeholder={whisperTarget ? `Secretly tell ${whisperTarget.name}...` : isActionMessage ? `Roleplay an action (e.g. sits by the fire...)` : `Speak in ${activeRoom === 'main-town' ? 'Main Town' : rooms.find(r => r.id === activeRoom)?.name || 'the realm'}... (Ctrl+V to paste image)`}
+                  className={`w-full bg-stone-950 border text-stone-200 py-4 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner ${whisperTarget ? 'border-fuchsia-800 placeholder-fuchsia-800/50 focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500/50' : isActionMessage ? 'border-indigo-800 placeholder-indigo-800/50 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 text-indigo-200 italic' : 'border-stone-700 placeholder-stone-600 focus:border-amber-600 focus:ring-1 focus:ring-amber-600/50'}`} />
                 <button type="submit" disabled={(!newMessage.trim() && !attachedImage) || !activeRoom}
-                  className={`absolute right-2 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md disabled:shadow-none ${whisperTarget ? 'bg-fuchsia-800 hover:bg-fuchsia-700 disabled:bg-stone-800 disabled:text-stone-600 text-fuchsia-100' : 'bg-amber-700 hover:bg-amber-600 disabled:bg-stone-800 disabled:text-stone-600 text-amber-100'}`}>
+                  className={`absolute right-2 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md disabled:shadow-none ${whisperTarget ? 'bg-fuchsia-800 hover:bg-fuchsia-700 disabled:bg-stone-800 disabled:text-stone-600 text-fuchsia-100' : isActionMessage ? 'bg-indigo-700 hover:bg-indigo-600 disabled:bg-stone-800 disabled:text-stone-600 text-indigo-100' : 'bg-amber-700 hover:bg-amber-600 disabled:bg-stone-800 disabled:text-stone-600 text-amber-100'}`}>
                   <Send className="w-5 h-5" />
                 </button>
               </div>
