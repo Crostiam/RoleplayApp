@@ -1569,6 +1569,7 @@ export default function App() {
                   <img src={focusedNotice.imageUrl} alt="Notice Attachment" className="w-full h-auto mb-8 rounded border border-stone-300 shadow-md" />
                 )}
                 
+                
                 <div className="whitespace-pre-wrap font-serif text-xl leading-relaxed text-stone-800 mb-8">{focusedNotice.content}</div>
             </div>
             
