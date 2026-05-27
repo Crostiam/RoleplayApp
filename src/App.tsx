@@ -168,7 +168,6 @@ export default function App() {
   const [boardTransform, setBoardTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
-  // Updated dragged notice to hold both start and current positions to decouple from DB updates
   const [draggedNotice, setDraggedNotice] = useState<{ id: string, startX: number, startY: number, mouseX: number, mouseY: number, currentX: number, currentY: number } | null>(null);
   
   const [roomToDelete, setRoomToDelete] = useState<string | null>(null);
@@ -276,7 +275,6 @@ export default function App() {
     const unsubBoard = onSnapshot(boardRef, (snapshot) => {
       const notices = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Notice[];
       notices.sort((a, b) => a.timestamp - b.timestamp);
-      // Removed draggedNotice dependency to avoid rapid refetching while dragging
       setInfoBoard(notices);
     }, (error) => console.error("Error fetching board:", error));
 
@@ -295,7 +293,8 @@ export default function App() {
       const updatePresence = async () => {
         try {
           const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'presence', profile.id);
-          await setDoc(userDocRef, { currentRoom: activeRoom, lastActive: Date.now() }, { merge: true });
+          // Push entire profile to ensure NO ghost sessions when switching rooms
+          await setDoc(userDocRef, { ...profile, currentRoom: activeRoom, lastActive: Date.now() }, { merge: true });
         } catch (e) { console.error("Error updating room presence:", e); }
       };
       updatePresence();
@@ -306,17 +305,20 @@ export default function App() {
          setBoardTransform({ x: window.innerWidth / 3, y: 100, scale: 1 });
       }
     }
-  }, [activeRoom, user, isJoined, profile.id]);
+  }, [activeRoom, user, isJoined, profile]);
 
   useEffect(() => {
     if (!user || !isJoined || !profile.id) return;
     const heartbeat = setInterval(async () => {
       try {
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'presence', profile.id), { lastActive: Date.now() }, { merge: true });
+        // Push entire profile to ensure NO ghost sessions if doc is deleted
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'presence', profile.id), { 
+            ...profile, currentRoom: activeRoom, lastActive: Date.now() 
+        }, { merge: true });
       } catch (e) { /* ignore */ }
     }, 60000); // 1 minute
     return () => clearInterval(heartbeat);
-  }, [user, isJoined, profile.id]);
+  }, [user, isJoined, profile, activeRoom]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1004,6 +1006,7 @@ export default function App() {
             </>
           )}
 
+          {}
           {sidebarTab === 'roster' && (
             <div className="px-4 space-y-3">
               <h2 className="text-xs font-bold text-stone-500 uppercase tracking-widest mb-4 px-2">Known Travelers</h2>
@@ -1011,20 +1014,24 @@ export default function App() {
                 <div className="text-center text-stone-500 italic py-4">No travelers yet.</div>
               ) : characters.map(char => {
                 const isOnline = presence.some(p => p.id === char.id && (currentTime - p.lastActive < 120000));
+                const avatarToUse = char.avatar || DEFAULT_AVATAR;
+                const nameToUse = char.name || 'Unknown Traveler';
+                const classToUse = char.charClass || 'Unknown Class';
+                
                 return (
                   <div key={char.id} onClick={() => { setInteractUser(char); setEditPointsAmount(char.points || 0); }}
                     className={`flex items-center justify-between p-3 rounded-lg border border-stone-800 shadow-sm transition-colors bg-stone-950/50 hover:bg-stone-800 cursor-pointer`}>
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="relative shrink-0">
-                        <img src={char.avatar} alt="avatar" className="w-10 h-10 rounded-md object-cover border border-stone-700 bg-stone-900" />
+                        <img src={avatarToUse} alt="avatar" className="w-10 h-10 rounded-md object-cover border border-stone-700 bg-stone-900" />
                         <div className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-stone-950 ${isOnline ? 'bg-green-500' : 'bg-stone-600'}`}></div>
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-bold text-stone-200 truncate flex items-center gap-1 text-sm">
-                          {char.name}
+                          {nameToUse}
                           {char.role === 'admin' && <Crown className="w-3 h-3 text-amber-500 shrink-0" />}
                         </div>
-                        <div className="text-xs text-stone-500 truncate">{char.charClass}</div>
+                        <div className="text-xs text-stone-500 truncate">{classToUse}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1063,15 +1070,17 @@ export default function App() {
                 
                 {characters.filter(c => c.id !== profile.id).map(char => {
                   const isActiveMail = activeRoom === 'mail' && activeMailTarget?.id === char.id;
+                  const avatarToUse = char.avatar || DEFAULT_AVATAR;
+                  const nameToUse = char.name || 'Unknown Traveler';
                   return (
                     <button 
                       key={char.id} 
                       onClick={() => { setActiveRoom('mail'); setActiveMailTarget(char); }}
                       className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors border ${isActiveMail ? 'bg-stone-800 border-indigo-500/50 text-indigo-300 shadow-inner' : 'bg-stone-950/50 border-stone-800 text-stone-300 hover:bg-stone-800'}`}
                     >
-                      <img src={char.avatar} alt="avatar" className="w-8 h-8 rounded-md object-cover bg-stone-900 border border-stone-700 shrink-0" />
+                      <img src={avatarToUse} alt="avatar" className="w-8 h-8 rounded-md object-cover bg-stone-900 border border-stone-700 shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <div className="font-bold text-sm truncate">{char.name}</div>
+                        <div className="font-bold text-sm truncate">{nameToUse}</div>
                         <div className="text-[10px] text-stone-500 uppercase tracking-widest truncate">Send Raven</div>
                       </div>
                     </button>
@@ -1086,13 +1095,13 @@ export default function App() {
           )}
         </div>
 
-        {/* Current User Profile */}
+        {}
         <div className="p-4 border-t border-stone-800 bg-stone-900 flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <img src={profile.avatar} alt="avatar" className="w-10 h-10 object-cover bg-stone-950 rounded-md border border-stone-800 shadow-inner shrink-0" />
+            <img src={profile.avatar || DEFAULT_AVATAR} alt="avatar" className="w-10 h-10 object-cover bg-stone-950 rounded-md border border-stone-800 shadow-inner shrink-0" />
             <div className="min-w-0">
-              <div className="font-bold text-amber-100 truncate w-24 md:w-32">{profile.name}</div>
-              <div className="text-xs text-stone-400 uppercase tracking-widest truncate">{profile.charClass}</div>
+              <div className="font-bold text-amber-100 truncate w-24 md:w-32">{profile.name || 'Unknown Traveler'}</div>
+              <div className="text-xs text-stone-400 uppercase tracking-widest truncate">{profile.charClass || 'Unknown'}</div>
             </div>
           </div>
           <div className="flex gap-1 shrink-0">
@@ -1108,7 +1117,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Views Container */}
+      {}
       {activeRoom === 'board' ? (
         <div className="flex-1 flex flex-col relative bg-stone-950 min-w-0 overflow-hidden select-none z-0">
           {/* Zoom Controls */}
@@ -1336,6 +1345,7 @@ export default function App() {
             ) : visibleMessages.map((msg) => {
               const isMe = msg.senderId === profile.id;
               const isAdminMsg = msg.role === 'admin';
+              const avatarToUse = msg.avatar || DEFAULT_AVATAR;
 
               if (msg.type === 'action' || msg.type === 'combat' || msg.type === 'roll') {
                 return (
@@ -1348,7 +1358,7 @@ export default function App() {
                     <span className={`flex flex-col items-center text-center px-6 py-3 border shadow-sm gap-2 ${(msg.type === 'combat' || msg.type === 'roll') ? 'bg-indigo-950/30 border-indigo-900/50 text-indigo-200 rounded-xl w-72 md:w-96' : 'bg-stone-950/50 border-stone-800 text-amber-500/80 italic rounded-full text-sm md:text-base'}`}>
                       {msg.isPinned && <div className="absolute -top-2 -right-2 bg-amber-500 text-stone-900 rounded-full p-1 shadow-lg"><Pin className="w-3 h-3" /></div>}
                       <div className="flex items-center">
-                        <img src={msg.avatar} className="w-6 h-6 rounded-full object-cover mr-2" alt="" />
+                        <img src={avatarToUse} className="w-6 h-6 rounded-full object-cover mr-2" alt="" />
                         <span><span className="font-bold">{msg.sender}</span> {msg.type === 'combat' ? `challenges ${msg.targetName}!` : msg.type === 'roll' ? msg.text.split('\n')[0] : msg.text}</span>
                       </div>
                       {(msg.type === 'combat' || msg.type === 'roll') && (
@@ -1389,7 +1399,7 @@ export default function App() {
               return (
                 <div key={msg.id} className={`flex flex-col max-w-[85%] md:max-w-2xl relative group ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
                   <div className="flex items-baseline gap-2 mb-1 px-1 w-full">
-                    {!isMe && <img src={msg.avatar} className="w-5 h-5 rounded-full object-cover mr-1" alt="" />}
+                    {!isMe && <img src={avatarToUse} className="w-5 h-5 rounded-full object-cover mr-1" alt="" />}
                     {msg.isPinned && <Pin className="w-3 h-3 text-amber-500 mr-1" />}
                     <span className={`text-sm font-semibold flex items-center gap-1 ${isAdminMsg ? 'text-amber-500' : isMe ? 'text-blue-400' : 'text-stone-300'}`}>
                       {msg.sender}
@@ -1455,7 +1465,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Right Sidebar - Hidden on Notice Board and Mail Room */}
+      {}
       {activeRoom !== 'board' && activeRoom !== 'mail' && (
         <div className="w-64 bg-stone-900 border-l border-stone-800 flex flex-col relative z-10 shadow-xl shrink-0 hidden lg:flex">
           <div className="p-4 border-b border-stone-800 bg-stone-950/50">
@@ -1464,41 +1474,46 @@ export default function App() {
             </h2>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
-            {usersInRoom.map(p => (
-              <button key={p.id} onClick={() => { setInteractUser(p); setEditPointsAmount(p.points || 0); }}
-                className={`w-full flex items-center justify-between p-3 rounded-lg text-left transition-colors border border-transparent hover:bg-stone-800 hover:border-stone-700 cursor-pointer`}>
-                <div className="flex items-center gap-3 min-w-0">
-                  <img src={p.avatar} alt="avatar" className="w-8 h-8 rounded-md object-cover bg-stone-950 border border-stone-800 shadow-inner shrink-0" />
-                  <div className="min-w-0">
-                    <div className="font-semibold text-stone-200 truncate">{p.name}</div>
-                    <div className="text-xs text-stone-500 truncate">{p.charClass}</div>
+            {usersInRoom.map(p => {
+              const avatarToUse = p.avatar || DEFAULT_AVATAR;
+              const nameToUse = p.name || 'Unknown Traveler';
+              const classToUse = p.charClass || 'Unknown';
+              return (
+                <button key={p.id} onClick={() => { setInteractUser(p); setEditPointsAmount(p.points || 0); }}
+                  className={`w-full flex items-center justify-between p-3 rounded-lg text-left transition-colors border border-transparent hover:bg-stone-800 hover:border-stone-700 cursor-pointer`}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <img src={avatarToUse} alt="avatar" className="w-8 h-8 rounded-md object-cover bg-stone-950 border border-stone-800 shadow-inner shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-semibold text-stone-200 truncate">{nameToUse}</div>
+                      <div className="text-xs text-stone-500 truncate">{classToUse}</div>
+                    </div>
                   </div>
-                </div>
-                <div className="text-xs font-bold text-amber-500 bg-amber-900/20 px-2 py-1 rounded-full border border-amber-900/50 shrink-0">
-                  {p.points || 0} pt
-                </div>
-              </button>
-            ))}
+                  <div className="text-xs font-bold text-amber-500 bg-amber-900/20 px-2 py-1 rounded-full border border-amber-900/50 shrink-0">
+                    {p.points || 0} pt
+                  </div>
+                </button>
+              );
+            })}
             {usersInRoom.length === 0 && <div className="text-stone-600 text-sm italic text-center mt-10">It is lonely here...</div>}
           </div>
         </div>
       )}
 
-      {/* Interact Modal */}
+      {}
       {interactUser && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-sm w-full relative flex flex-col max-h-[90vh] overflow-hidden">
             <div className="h-24 shrink-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-stone-700 via-stone-800 to-stone-900 flex items-end justify-center pb-4 relative">
               <button onClick={() => setInteractUser(null)} className="absolute top-4 right-4 text-stone-400 hover:text-white"><X className="w-5 h-5" /></button>
               <div className="absolute -bottom-8 w-20 h-20 bg-stone-950 p-1 rounded-full border-4 border-stone-900 shadow-xl">
-                <img src={interactUser.avatar} alt="avatar" className="w-full h-full rounded-full object-cover" />
+                <img src={interactUser.avatar || DEFAULT_AVATAR} alt="avatar" className="w-full h-full rounded-full object-cover" />
               </div>
             </div>
             <div className="pt-12 pb-6 px-6 text-center space-y-4 overflow-y-auto custom-scrollbar flex-1">
               <div>
-                <h3 className="text-2xl font-bold text-amber-500">{interactUser.name}</h3>
+                <h3 className="text-2xl font-bold text-amber-500">{interactUser.name || 'Unknown Traveler'}</h3>
                 <p className="text-stone-400 text-sm uppercase tracking-wider flex items-center justify-center gap-2">
-                  {interactUser.charClass}
+                  {interactUser.charClass || 'Unknown Class'}
                   {interactUser.role === 'admin' && <Crown className="w-4 h-4 text-amber-500" />}
                 </p>
                 <div className="mt-2 text-amber-400 font-bold text-sm bg-amber-900/30 inline-block px-3 py-1 rounded-full border border-amber-900/50 shadow-inner">
@@ -1571,7 +1586,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Room Creation Modal */}
+      {}
       {isCreatingRoom && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-sm w-full p-6 relative overflow-hidden">
@@ -1627,7 +1642,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Room Edit Modal */}
       {editingRoomId && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-sm w-full p-6 relative overflow-hidden">
@@ -1683,7 +1697,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Notice Board Creation Modal */}
+      {}
       {isAddingNotice && activeRoom === 'board' && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-lg w-full p-6 relative flex flex-col max-h-[90vh]">
@@ -1727,7 +1741,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Room Deletion Modal */}
+      {}
       {roomToDelete && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-red-900/50 rounded-xl shadow-2xl max-w-sm w-full p-6 relative overflow-hidden">
@@ -1743,7 +1757,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Focused Notice Modal */}
+      {}
       {focusedNotice && (
         <div className="absolute inset-0 bg-stone-950/90 backdrop-blur-md z-[70] flex items-center justify-center p-4" onPointerDown={() => setFocusedNotice(null)}>
           <div className="bg-[#fdf5e6] border border-[#d4c4a8] rounded shadow-2xl max-w-3xl w-full p-8 md:p-12 relative flex flex-col max-h-[90vh]" onPointerDown={e => e.stopPropagation()}>
