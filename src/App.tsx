@@ -54,6 +54,7 @@ interface Message {
   timestamp: number;
   targetId?: string;
   targetName?: string;
+  isPinned?: boolean;
 }
 
 interface PresenceUser {
@@ -128,7 +129,7 @@ const DEFAULT_PROFILE: Profile = {
   id: '', username: '', name: '', passphrase: '', role: 'player', charClass: '', avatar: DEFAULT_AVATAR, bio: ''
 };
 
-export default function MedievalChatApp() {
+export default function App() {
   const [user, setUser] = useState<import('firebase/auth').User | null>(null);
   const [isJoined, setIsJoined] = useState(false);
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
@@ -141,6 +142,7 @@ export default function MedievalChatApp() {
   const [presence, setPresence] = useState<PresenceUser[]>([]);
   
   const [newMessage, setNewMessage] = useState('');
+  const [isPinned, setIsPinned] = useState(false);
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
@@ -169,7 +171,6 @@ export default function MedievalChatApp() {
   const [roomToDelete, setRoomToDelete] = useState<string | null>(null);
   const [interactUser, setInteractUser] = useState<PresenceUser | null>(null);
   const [whisperTarget, setWhisperTarget] = useState<PresenceUser | null>(null);
-  const [roomEntryTime, setRoomEntryTime] = useState(Date.now());
 
   // Mail System State
   const [mails, setMails] = useState<MailMessage[]>([]);
@@ -296,7 +297,6 @@ export default function MedievalChatApp() {
   }, [user, isJoined, profile.role, draggedNotice]);
 
   useEffect(() => {
-    setRoomEntryTime(Date.now());
     if (user && isJoined && profile.id) {
       const updatePresence = async () => {
         try {
@@ -432,14 +432,20 @@ export default function MedievalChatApp() {
   };
 
   const visibleMessages = messages.filter(msg => {
-    if (msg.roomId !== activeRoom) return false;
+    // Show messages pinned to the room regardless of user flow or just regular room messages
+    const isPinnedInRoom = msg.roomId === activeRoom && msg.isPinned;
+    const isRoomMessage = msg.roomId === activeRoom;
+    
+    if (!isPinnedInRoom && !isRoomMessage) return false;
+    
+    // If it's a whisper, only show if you are the sender, the target, or an admin
     if (msg.type === 'whisper') {
       const isMyWhisper = msg.senderId === profile.id || msg.targetId === profile.id;
       const isAdmin = profile.role === 'admin';
       if (!isMyWhisper && !isAdmin) return false;
     }
-    if (profile.role === 'admin' || activeRoom === 'main-town') return true;
-    return msg.timestamp >= roomEntryTime;
+    
+    return true;
   });
 
   const usersInRoom = presence.filter(p => p.currentRoom === activeRoom);
@@ -726,7 +732,8 @@ export default function MedievalChatApp() {
       text,
       imageUrl: attachedImage,
       type,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      isPinned: type === 'chat' ? isPinned : false
     };
 
     if (type === 'whisper' || type === 'action' || type === 'combat') {
@@ -736,6 +743,7 @@ export default function MedievalChatApp() {
 
     await addDoc(messagesRef, payload);
     setAttachedImage(null);
+    setIsPinned(false);
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -1370,12 +1378,20 @@ export default function MedievalChatApp() {
                   </button>
                 </div>
               )}
-              <div className="relative flex items-center w-full">
+              <div className="relative flex items-center w-full gap-2">
                 <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onPaste={handlePaste}
                   placeholder={whisperTarget ? `Secretly tell ${whisperTarget.name}...` : `Speak in ${activeRoom === 'main-town' ? 'Main Town' : rooms.find(r => r.id === activeRoom)?.name || 'the realm'}... (Ctrl+V to paste image)`}
                   className={`w-full bg-stone-950 border text-stone-200 py-4 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner ${whisperTarget ? 'border-fuchsia-800 placeholder-fuchsia-800/50 focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500/50' : 'border-stone-700 placeholder-stone-600 focus:border-amber-600 focus:ring-1 focus:ring-amber-600/50'}`} />
+                
+                {!whisperTarget && (
+                  <button type="button" onClick={() => setIsPinned(!isPinned)}
+                    className={`p-3 rounded-xl border transition-all ${isPinned ? 'bg-amber-900 border-amber-500 text-amber-200' : 'bg-stone-800 border-stone-700 text-stone-400 hover:border-stone-500'}`} title="Pin Message">
+                    <Book className="w-5 h-5" />
+                  </button>
+                )}
+
                 <button type="submit" disabled={(!newMessage.trim() && !attachedImage) || !activeRoom}
-                  className={`absolute right-2 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md disabled:shadow-none ${whisperTarget ? 'bg-fuchsia-800 hover:bg-fuchsia-700 disabled:bg-stone-800 disabled:text-stone-600 text-fuchsia-100' : 'bg-amber-700 hover:bg-amber-600 disabled:bg-stone-800 disabled:text-stone-600 text-amber-100'}`}>
+                  className={`p-3 rounded-xl transition-colors flex items-center justify-center shadow-md disabled:shadow-none ${whisperTarget ? 'bg-fuchsia-800 hover:bg-fuchsia-700 disabled:bg-stone-800 disabled:text-stone-600 text-fuchsia-100' : 'bg-amber-700 hover:bg-amber-600 disabled:bg-stone-800 disabled:text-stone-600 text-amber-100'}`}>
                   <Send className="w-5 h-5" />
                 </button>
               </div>
