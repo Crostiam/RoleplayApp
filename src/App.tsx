@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Send, Map, Swords, Crown, Beer, TreePine, LogOut, Scroll, Users, X, MessageSquare, Plus, Trash2, Book, Flame, Edit, Mail, ZoomIn, ZoomOut, Maximize, Move, Clock, Feather, Minus, Maximize2 } from 'lucide-react';
+import { Shield, Send, Map, Swords, Crown, Beer, TreePine, LogOut, Scroll, Users, X, MessageSquare, Plus, Trash2, Book, Flame, Edit, Mail, ZoomIn, ZoomOut, Maximize, Move, Clock, Feather, Minus, Maximize2, Pin } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, doc, setDoc, deleteDoc, getDoc, updateDoc } from 'firebase/firestore';
@@ -31,6 +31,7 @@ interface Profile {
   charClass: string;
   avatar: string;
   bio: string;
+  points?: number; // Added Points
 }
 
 interface Room {
@@ -39,6 +40,7 @@ interface Room {
   description: string;
   iconName: string;
   createdAt: number;
+  bgImageUrl?: string; // Added background image support
 }
 
 interface Message {
@@ -54,7 +56,7 @@ interface Message {
   timestamp: number;
   targetId?: string;
   targetName?: string;
-  isPinned?: boolean;
+  isPinned?: boolean; // Added Pinning
 }
 
 interface PresenceUser {
@@ -66,6 +68,7 @@ interface PresenceUser {
   bio: string;
   currentRoom: string;
   lastActive: number;
+  points?: number; // Added Points
 }
 
 interface Character {
@@ -75,6 +78,7 @@ interface Character {
   avatar: string;
   role: string;
   bio: string;
+  points?: number; // Added Points
 }
 
 interface Notice {
@@ -103,15 +107,7 @@ interface MailMessage {
 
 // --- Constants ---
 const ICON_MAP: Record<string, LucideIcon> = {
-  beer: Beer,
-  swords: Swords,
-  crown: Crown,
-  treepine: TreePine,
-  map: Map,
-  shield: Shield,
-  scroll: Scroll,
-  book: Book,
-  flame: Flame
+  beer: Beer, swords: Swords, crown: Crown, treepine: TreePine, map: Map, shield: Shield, scroll: Scroll, book: Book, flame: Flame
 };
 
 const AVAILABLE_ICONS = Object.keys(ICON_MAP);
@@ -126,7 +122,7 @@ const INITIAL_ROOMS = [
 const DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%239ca3af'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z'/%3E%3C/svg%3E";
 
 const DEFAULT_PROFILE: Profile = {
-  id: '', username: '', name: '', passphrase: '', role: 'player', charClass: '', avatar: DEFAULT_AVATAR, bio: ''
+  id: '', username: '', name: '', passphrase: '', role: 'player', charClass: '', avatar: DEFAULT_AVATAR, bio: '', points: 0
 };
 
 export default function App() {
@@ -138,17 +134,19 @@ export default function App() {
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
+  const [roomJoinTime, setRoomJoinTime] = useState<number>(Date.now()); // Tracks when user entered current room
   const [messages, setMessages] = useState<Message[]>([]);
   const [presence, setPresence] = useState<PresenceUser[]>([]);
   
   const [newMessage, setNewMessage] = useState('');
-  const [isPinned, setIsPinned] = useState(false);
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [isPinningNextMessage, setIsPinningNextMessage] = useState(false); // Pin toggle
   
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [newRoomDesc, setNewRoomDesc] = useState('');
   const [newRoomIcon, setNewRoomIcon] = useState('map');
+  const [newRoomBgUrl, setNewRoomBgUrl] = useState('');
   
   const [characters, setCharacters] = useState<Character[]>([]);
   const [sidebarTab, setSidebarTab] = useState<'realms' | 'roster' | 'board' | 'mail'>('realms');
@@ -168,9 +166,13 @@ export default function App() {
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [draggedNotice, setDraggedNotice] = useState<{ id: string, startX: number, startY: number, mouseX: number, mouseY: number } | null>(null);
   
+  // Interaction & Roleplay State
   const [roomToDelete, setRoomToDelete] = useState<string | null>(null);
-  const [interactUser, setInteractUser] = useState<PresenceUser | null>(null);
-  const [whisperTarget, setWhisperTarget] = useState<PresenceUser | null>(null);
+  const [interactUser, setInteractUser] = useState<PresenceUser | Character | null>(null);
+  const [whisperTarget, setWhisperTarget] = useState<PresenceUser | Character | null>(null);
+  const [customAction, setCustomAction] = useState('');
+  const [editPointsAmount, setEditPointsAmount] = useState<number>(0);
+  const [currentTime, setCurrentTime] = useState<number>(Date.now());
 
   // Mail System State
   const [mails, setMails] = useState<MailMessage[]>([]);
@@ -189,6 +191,7 @@ export default function App() {
     const checkCooldown = () => {
       const lastSent = parseInt(localStorage.getItem('medieval_last_mail_time') || '0');
       const now = Date.now();
+      setCurrentTime(now); // Update time for AFK status checks
       const elapsed = Math.floor((now - lastSent) / 1000);
       if (elapsed < 60) {
         setMailCooldown(60 - Math.max(0, elapsed));
@@ -268,10 +271,8 @@ export default function App() {
     const boardRef = collection(db, 'artifacts', appId, 'public', 'data', 'board');
     const unsubBoard = onSnapshot(boardRef, (snapshot) => {
       const notices = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Notice[];
-      // Keep sort stable by timestamp
       notices.sort((a, b) => a.timestamp - b.timestamp);
       
-      // Merge optimistic dragging state with DB state to prevent jitter
       setInfoBoard(prev => {
         if (!draggedNotice) return notices;
         return notices.map(n => {
@@ -289,7 +290,7 @@ export default function App() {
     const mailRef = collection(db, 'artifacts', appId, 'public', 'data', 'mail');
     const unsubMail = onSnapshot(mailRef, (snapshot) => {
       const dbMails = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as MailMessage[];
-      dbMails.sort((a, b) => a.timestamp - b.timestamp); // Sort oldest first for chat flow
+      dbMails.sort((a, b) => a.timestamp - b.timestamp);
       setMails(dbMails);
     }, (error) => console.error("Error fetching mail:", error));
 
@@ -306,12 +307,26 @@ export default function App() {
       };
       updatePresence();
       
+      // Update room join timestamp for transient history filtering
+      setRoomJoinTime(Date.now());
+      
       // Center board on entry
       if (activeRoom === 'board') {
          setBoardTransform({ x: window.innerWidth / 3, y: 100, scale: 1 });
       }
     }
   }, [activeRoom, user, isJoined, profile.id]);
+
+  // Heartbeat to keep presence active
+  useEffect(() => {
+    if (!user || !isJoined || !profile.id) return;
+    const heartbeat = setInterval(async () => {
+      try {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'presence', profile.id), { lastActive: Date.now() }, { merge: true });
+      } catch (e) { /* ignore */ }
+    }, 60000); // 1 minute
+    return () => clearInterval(heartbeat);
+  }, [user, isJoined, profile.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -328,14 +343,11 @@ export default function App() {
         const canvas = document.createElement('canvas');
         const MAX_WIDTH = 150, MAX_HEIGHT = 150;
         let width = img.width, height = img.height;
-
         if (width > height) { if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; } }
         else { if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; } }
-
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
-
         ctx.drawImage(img, 0, 0, width, height);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
         setProfile(prev => ({ ...prev, avatar: dataUrl }));
@@ -363,7 +375,7 @@ export default function App() {
       }
 
       const determinedRole = profile.username.toLowerCase() === 'test' ? 'admin' : profile.role || 'player';
-      const finalProfile = { ...profile, id: charId, role: determinedRole };
+      const finalProfile = { ...profile, id: charId, role: determinedRole, points: profile.points || 0 };
 
       await setDoc(docRef, { ...finalProfile, lastSeen: Date.now() });
       localStorage.setItem('medieval_char_id', charId);
@@ -432,33 +444,36 @@ export default function App() {
   };
 
   const visibleMessages = messages.filter(msg => {
-    // Show messages pinned to the room regardless of user flow or just regular room messages
-    const isPinnedInRoom = msg.roomId === activeRoom && msg.isPinned;
-    const isRoomMessage = msg.roomId === activeRoom;
+    // 1. Must belong to current room
+    if (msg.roomId !== activeRoom) return false;
     
-    if (!isPinnedInRoom && !isRoomMessage) return false;
-    
-    // If it's a whisper, only show if you are the sender, the target, or an admin
+    // 2. Whisper Visibility
     if (msg.type === 'whisper') {
       const isMyWhisper = msg.senderId === profile.id || msg.targetId === profile.id;
       const isAdmin = profile.role === 'admin';
       if (!isMyWhisper && !isAdmin) return false;
     }
     
-    return true;
+    // 3. Transient History Check
+    const isAdmin = profile.role === 'admin';
+    const isMainTown = activeRoom === 'main-town';
+    const isPinned = msg.isPinned;
+    const isRecent = msg.timestamp >= roomJoinTime;
+    
+    // Admins see all. Main town keeps all. Pinned are always kept. Otherwise, must be recent.
+    return isAdmin || isMainTown || isPinned || isRecent;
   });
 
-  const usersInRoom = presence.filter(p => p.currentRoom === activeRoom);
+  // Filter out users who haven't updated their presence in 2 minutes (AFK check)
+  const usersInRoom = presence.filter(p => p.currentRoom === activeRoom && (currentTime - p.lastActive < 120000));
 
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
-
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
         const blob = items[i].getAsFile();
         if (!blob) break;
-
         const reader = new FileReader();
         reader.onload = (event) => {
           const img = new Image();
@@ -466,13 +481,10 @@ export default function App() {
             const canvas = document.createElement('canvas');
             const MAX_WIDTH = 500;
             let width = img.width, height = img.height;
-
             if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
             canvas.width = width; canvas.height = height;
-
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
-
             ctx.drawImage(img, 0, 0, width, height);
             const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
             setAttachedImage(dataUrl);
@@ -489,11 +501,9 @@ export default function App() {
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRoomName.trim()) return;
-
     const roomsRef = collection(db, 'artifacts', appId, 'public', 'data', 'rooms');
-    await addDoc(roomsRef, { name: newRoomName, description: newRoomDesc, iconName: newRoomIcon, createdAt: Date.now() });
-
-    setIsCreatingRoom(false); setNewRoomName(''); setNewRoomDesc(''); setNewRoomIcon('map');
+    await addDoc(roomsRef, { name: newRoomName, description: newRoomDesc, iconName: newRoomIcon, bgImageUrl: newRoomBgUrl, createdAt: Date.now() });
+    setIsCreatingRoom(false); setNewRoomName(''); setNewRoomDesc(''); setNewRoomIcon('map'); setNewRoomBgUrl('');
   };
 
   const confirmDeleteRoom = async () => {
@@ -507,23 +517,16 @@ export default function App() {
     } catch (err) { console.error(err); }
   };
 
-  // Zoom on wheel scroll
   const handleBoardWheel = (e: React.WheelEvent) => {
     if (activeRoom !== 'board') return;
-    
     const scaleChange = e.deltaY * -0.001;
     let newScale = boardTransform.scale + scaleChange;
-    // Clamp zoom levels
     newScale = Math.min(Math.max(0.15, newScale), 3);
-    
     const ratio = newScale / boardTransform.scale;
-    
-    // Zoom exactly where the mouse pointer is
     if (boardRef.current) {
       const rect = boardRef.current.getBoundingClientRect();
       const pointerX = e.clientX - rect.left;
       const pointerY = e.clientY - rect.top;
-      
       setBoardTransform(prev => ({
         scale: newScale,
         x: pointerX - (pointerX - prev.x) * ratio,
@@ -532,52 +535,30 @@ export default function App() {
     }
   };
 
-  // Generic pointer handlers for Panning the Board OR Dragging a Notice
   const handleBoardPointerDown = (e: React.PointerEvent) => {
-    // Only pan if we aren't dragging a notice
     if (!draggedNotice) {
       setIsPanning(true);
       setPanStart({ x: e.clientX - boardTransform.x, y: e.clientY - boardTransform.y });
-      // Capture pointer so dragging outside the window still works
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     }
   };
 
   const handleNoticePointerDown = (e: React.PointerEvent, notice: Notice) => {
-    if (profile.role !== 'admin' && notice.authorId !== profile.id) return; // Only admins and authors can move notices
-    e.stopPropagation(); // Don't trigger board pan
-    
-    // Capture pointer on the notice element
+    if (profile.role !== 'admin' && notice.authorId !== profile.id) return; 
+    e.stopPropagation(); 
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    
-    setDraggedNotice({
-      id: notice.id,
-      startX: notice.x || 0,
-      startY: notice.y || 0,
-      mouseX: e.clientX,
-      mouseY: e.clientY
-    });
+    setDraggedNotice({ id: notice.id, startX: notice.x || 0, startY: notice.y || 0, mouseX: e.clientX, mouseY: e.clientY });
   };
 
   const handleGlobalPointerMove = (e: React.PointerEvent) => {
     if (draggedNotice) {
-      // We are dragging a notice
       const dx = (e.clientX - draggedNotice.mouseX) / boardTransform.scale;
       const dy = (e.clientY - draggedNotice.mouseY) / boardTransform.scale;
-      
-      // Update local state optimistically
       setInfoBoard(prev => prev.map(n => 
-        n.id === draggedNotice.id 
-          ? { ...n, x: draggedNotice.startX + dx, y: draggedNotice.startY + dy }
-          : n
+        n.id === draggedNotice.id ? { ...n, x: draggedNotice.startX + dx, y: draggedNotice.startY + dy } : n
       ));
     } else if (isPanning) {
-      // We are panning the board
-      setBoardTransform(prev => ({
-        ...prev,
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y
-      }));
+      setBoardTransform(prev => ({ ...prev, x: e.clientX - panStart.x, y: e.clientY - panStart.y }));
     }
   };
 
@@ -586,24 +567,19 @@ export default function App() {
       setIsPanning(false);
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     }
-    
     if (draggedNotice) {
       const noticeToSave = infoBoard.find(n => n.id === draggedNotice.id);
       if (noticeToSave) {
-        // Save new coordinates to Firebase
         try {
           const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'board', noticeToSave.id);
           await updateDoc(docRef, { x: noticeToSave.x, y: noticeToSave.y });
-        } catch (err) {
-          console.error("Failed to save notice position", err);
-        }
+        } catch (err) { console.error("Failed to save notice position", err); }
       }
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
       setDraggedNotice(null);
     }
   };
 
-  // Zoom controls
   const handleZoomIn = () => setBoardTransform(p => ({ ...p, scale: Math.min(p.scale + 0.2, 3) }));
   const handleZoomOut = () => setBoardTransform(p => ({ ...p, scale: Math.max(p.scale - 0.2, 0.15) }));
   const handleResetView = () => setBoardTransform({ x: window.innerWidth / 3, y: 100, scale: 1 });
@@ -611,26 +587,21 @@ export default function App() {
   const handleNoticeImagePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
-
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
         const blob = items[i].getAsFile();
         if (!blob) break;
-
         const reader = new FileReader();
         reader.onload = (event) => {
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 800; // Larger resolution for board notices
+            const MAX_WIDTH = 800;
             let width = img.width, height = img.height;
-
             if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
             canvas.width = width; canvas.height = height;
-
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
-
             ctx.drawImage(img, 0, 0, width, height);
             const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
             setAttachedNoticeImage(dataUrl);
@@ -648,22 +619,13 @@ export default function App() {
     if (!newNoticeContent.trim() && !attachedNoticeImage) return;
     try {
       const boardRef = collection(db, 'artifacts', appId, 'public', 'data', 'board');
-      
-      // Calculate center of screen relative to current transform
       const screenCenterX = window.innerWidth / 2;
       const screenCenterY = window.innerHeight / 2;
       const initialX = (screenCenterX - boardTransform.x) / boardTransform.scale;
       const initialY = (screenCenterY - boardTransform.y) / boardTransform.scale;
-
       await addDoc(boardRef, { 
-        title: newNoticeTitle || 'Public Decree', 
-        content: newNoticeContent, 
-        imageUrl: attachedNoticeImage,
-        timestamp: Date.now(), 
-        author: profile.name,
-        authorId: profile.id,
-        x: initialX,
-        y: initialY
+        title: newNoticeTitle || 'Public Decree', content: newNoticeContent, imageUrl: attachedNoticeImage,
+        timestamp: Date.now(), author: profile.name, authorId: profile.id, x: initialX, y: initialY
       });
       setIsAddingNotice(false); setNewNoticeTitle(''); setNewNoticeContent(''); setAttachedNoticeImage(null);
     } catch (err) { console.error("Error saving board:", err); }
@@ -676,80 +638,51 @@ export default function App() {
 
   const handleScaleNotice = async (notice: Notice, delta: number) => {
     const newScale = Math.max(0.5, Math.min((notice.scale || 1) + delta, 3));
-    try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'board', notice.id), { scale: newScale });
-    } catch (err) { console.error("Error scaling notice:", err); }
+    try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'board', notice.id), { scale: newScale }); } 
+    catch (err) { console.error("Error scaling notice:", err); }
   };
 
   const handleDeleteMessage = async (msgId: string) => {
     if (profile.role !== 'admin') return;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId));
-    } catch (err) { console.error("Error deleting message:", err); }
+    try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId)); }
+    catch (err) { console.error("Error deleting message:", err); }
   };
 
   const handleSendMail = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeMailTarget || !mailContent.trim() || activeMailTarget.id === 'ALL') return;
-
     const lastSent = parseInt(localStorage.getItem('medieval_last_mail_time') || '0');
     const now = Date.now();
     
-    // 1-minute cooldown, bypassed for admins
-    if (now - lastSent < 60000 && profile.role !== 'admin') {
-      return; // UI handles blocking now
-    }
-
+    if (now - lastSent < 60000 && profile.role !== 'admin') return;
+    
     try {
       const mailRef = collection(db, 'artifacts', appId, 'public', 'data', 'mail');
-      await addDoc(mailRef, {
-        senderId: profile.id,
-        senderName: profile.name,
-        targetId: activeMailTarget.id,
-        targetName: activeMailTarget.name,
-        content: mailContent,
-        timestamp: now
-      });
-      
+      await addDoc(mailRef, { senderId: profile.id, senderName: profile.name, targetId: activeMailTarget.id, targetName: activeMailTarget.name, content: mailContent, timestamp: now });
       localStorage.setItem('medieval_last_mail_time', now.toString());
       setMailContent('');
       setMailCooldown(60);
-    } catch (err) {
-      console.error("Error sending mail:", err);
-    }
+    } catch (err) { console.error("Error sending mail:", err); }
   };
 
-  const sendMessage = async (text: string, type = 'chat', customTarget: PresenceUser | null = null) => {
+  const sendMessage = async (text: string, type = 'chat', customTarget: PresenceUser | Character | null = null) => {
     if (!user || !profile.id) return;
     const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
-
     const payload: Partial<Message> = {
-      roomId: activeRoom ?? undefined,
-      sender: profile.name,
-      senderId: profile.id,
-      role: profile.role,
-      avatar: profile.avatar,
-      text,
-      imageUrl: attachedImage,
-      type,
-      timestamp: Date.now(),
-      isPinned: type === 'chat' ? isPinned : false
+      roomId: activeRoom ?? undefined, sender: profile.name, senderId: profile.id, role: profile.role,
+      avatar: profile.avatar, text, imageUrl: attachedImage, type, timestamp: Date.now(), isPinned: isPinningNextMessage
     };
-
-    if (type === 'whisper' || type === 'action' || type === 'combat') {
+    if (type === 'whisper' || type === 'action' || type === 'roll') {
       payload.targetId = customTarget?.id || whisperTarget?.id;
       payload.targetName = customTarget?.name || whisperTarget?.name;
     }
-
     await addDoc(messagesRef, payload);
     setAttachedImage(null);
-    setIsPinned(false);
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() && !attachedImage) return;
-
     if (whisperTarget) {
       await sendMessage(newMessage, 'whisper');
       setNewMessage(''); setWhisperTarget(null);
@@ -768,22 +701,34 @@ export default function App() {
       case 'bow': actionText = `bows deeply to ${interactUser.name}.`; break;
       case 'cheer': actionText = `raises a frothy tankard to ${interactUser.name}!`; break;
       case 'slap': actionText = `slaps ${interactUser.name} across the face! Have at thee!`; break;
-      case 'duel':
+      case 'custom':
         const myRoll = Math.floor(Math.random() * 20) + 1;
         const theirRoll = Math.floor(Math.random() * 20) + 1;
         let resultText = '';
-        if (myRoll > theirRoll) resultText = `🏆 ${profile.name} is victorious!`;
-        else if (theirRoll > myRoll) resultText = `☠️ ${profile.name} was defeated!`;
-        else resultText = `🤝 It is a draw!`;
+        if (myRoll > theirRoll) resultText = `✨ Success!`;
+        else if (theirRoll > myRoll) resultText = `❌ Failed!`;
+        else resultText = `🤝 Tie! Unclear outcome.`;
         
-        actionText = `⚔️ Rolled a ${myRoll}\n🛡️ ${interactUser.name} rolled a ${theirRoll}\n\n${resultText}`;
-        msgType = 'combat';
+        actionText = `attempts to **${customAction}** ${interactUser.name}!\n\nRolled a ${myRoll}\n${interactUser.name} resisted with a ${theirRoll}\n\n${resultText}`;
+        msgType = 'roll';
+        setCustomAction('');
         break;
       default: actionText = `looks at ${interactUser.name}.`;
     }
 
     await sendMessage(actionText, msgType, interactUser);
     setInteractUser(null);
+  };
+
+  const handleUpdatePoints = async (newPoints: number) => {
+    if (!interactUser || profile.role !== 'admin') return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'characters', interactUser.id), { points: newPoints });
+      try {
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'presence', interactUser.id), { points: newPoints });
+      } catch (e) { /* user might be offline/missing presence doc */ }
+      setInteractUser({ ...interactUser, points: newPoints });
+    } catch (err) { console.error("Error updating points:", err); }
   };
 
   if (!user) {
@@ -873,7 +818,6 @@ export default function App() {
                 </div>
               )}
             </div>
-
             <button type="submit"
               disabled={authMode === 'login' ? (!profile.username.trim() || !profile.passphrase.trim()) : (!profile.username.trim() || !profile.name.trim() || !profile.passphrase.trim())}
               className="w-full mt-8 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-amber-100 font-bold py-4 px-4 rounded-lg transition-colors shadow-lg text-lg tracking-wide uppercase">
@@ -970,9 +914,10 @@ export default function App() {
               {characters.length === 0 ? (
                 <div className="text-center text-stone-500 italic py-4">No travelers yet.</div>
               ) : characters.map(char => {
-                const isOnline = presence.some(p => p.id === char.id);
+                const isOnline = presence.some(p => p.id === char.id && (currentTime - p.lastActive < 120000));
                 return (
-                  <div key={char.id} className="flex items-center justify-between p-3 bg-stone-950/50 rounded-lg border border-stone-800 shadow-sm">
+                  <div key={char.id} onClick={() => { if (char.id !== profile.id) { setInteractUser(char); setEditPointsAmount(char.points || 0); } }}
+                    className={`flex items-center justify-between p-3 rounded-lg border border-stone-800 shadow-sm transition-colors ${char.id !== profile.id ? 'bg-stone-950/50 hover:bg-stone-800 cursor-pointer' : 'bg-stone-950/30 opacity-70 cursor-default'}`}>
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="relative shrink-0">
                         <img src={char.avatar} alt="avatar" className="w-10 h-10 rounded-md object-cover border border-stone-700 bg-stone-900" />
@@ -986,12 +931,17 @@ export default function App() {
                         <div className="text-xs text-stone-500 truncate">{char.charClass}</div>
                       </div>
                     </div>
-                    {profile.role === 'admin' && char.id !== profile.id && (
-                      <button onClick={() => handleDeleteCharacter(char.id)}
-                        className="p-1.5 text-stone-600 hover:text-red-400 hover:bg-red-950/30 rounded transition-colors shrink-0">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs font-bold text-amber-500 bg-amber-900/20 px-2 py-1 rounded-full border border-amber-900/50 shrink-0">
+                        {char.points || 0} pt
+                      </div>
+                      {profile.role === 'admin' && char.id !== profile.id && (
+                        <button onClick={(e) => { e.stopPropagation(); handleDeleteCharacter(char.id); }}
+                          className="p-1.5 text-stone-600 hover:text-red-400 hover:bg-red-950/30 rounded transition-colors shrink-0">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -1100,15 +1050,9 @@ export default function App() {
             onPointerUp={handleGlobalPointerUp}
             onPointerLeave={handleGlobalPointerUp}
             onWheel={handleBoardWheel}
-            style={{
-              backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M11 18c13.866 0 25.362 10.24 26.58 24h-1.08c-1.1-13.255-12.022-23-25.5-23V18zm0 11c7.732 0 14.28 6.046 14.956 14h-1.036c-.6-7.46-6.756-13-13.92-13V29zm0 10c2.21 0 4 1.79 4 4h-1c0-1.657-1.343-3-3-3v-1zm10-40c16.568 0 30 13.432 30 30h-1c0-15.932-12.91-28.85-28.85-28.85V-1zm-10 0c22.09 0 40 17.91 40 40h-1c0-21.54-17.46-39-39-39V-1z\' fill=\'%233a322c\' fill-opacity=\'0.4\' fill-rule=\'evenodd\'/%3E%3C/svg%3E")',
-            }}
+            style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M11 18c13.866 0 25.362 10.24 26.58 24h-1.08c-1.1-13.255-12.022-23-25.5-23V18zm0 11c7.732 0 14.28 6.046 14.956 14h-1.036c-.6-7.46-6.756-13-13.92-13V29zm0 10c2.21 0 4 1.79 4 4h-1c0-1.657-1.343-3-3-3v-1zm10-40c16.568 0 30 13.432 30 30h-1c0-15.932-12.91-28.85-28.85-28.85V-1zm-10 0c22.09 0 40 17.91 40 40h-1c0-21.54-17.46-39-39-39V-1z\' fill=\'%233a322c\' fill-opacity=\'0.4\' fill-rule=\'evenodd\'/%3E%3C/svg%3E")' }}
           >
-             {/* Transform Container */}
-             <div 
-                className="absolute origin-top-left will-change-transform"
-                style={{ transform: `translate(${boardTransform.x}px, ${boardTransform.y}px) scale(${boardTransform.scale})` }}
-             >
+             <div className="absolute origin-top-left will-change-transform" style={{ transform: `translate(${boardTransform.x}px, ${boardTransform.y}px) scale(${boardTransform.scale})` }}>
                 {infoBoard.map(notice => {
                   const isDraggingThis = draggedNotice?.id === notice.id;
                   const canEdit = profile.role === 'admin' || notice.authorId === profile.id;
@@ -1119,12 +1063,7 @@ export default function App() {
                       key={notice.id} 
                       onPointerDown={(e) => handleNoticePointerDown(e, notice)}
                       className={`absolute w-80 bg-[#fdf5e6] text-stone-900 p-6 shadow-2xl border border-[#d4c4a8] ${canEdit ? (isDraggingThis ? 'cursor-grabbing z-50' : 'cursor-grab hover:z-30') : 'z-10'} transition-all duration-150 group`}
-                      style={{ 
-                         left: notice.x || 0, 
-                         top: notice.y || 0,
-                         transformOrigin: 'top left',
-                         transform: `scale(${currentScale})`,
-                      }}
+                      style={{ left: notice.x || 0, top: notice.y || 0, transformOrigin: 'top left', transform: `scale(${currentScale})` }}
                     >
                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-red-800 shadow-[0_2px_4px_rgba(0,0,0,0.5)] border border-red-950 z-20 pointer-events-none">
                           <div className="absolute top-1 left-1 w-1 h-1 bg-white/40 rounded-full"></div>
@@ -1144,11 +1083,7 @@ export default function App() {
                        </div>
                        
                        <h3 className="font-bold text-xl mb-3 text-stone-800 font-serif border-b border-stone-300 pb-2 pointer-events-none">{notice.title}</h3>
-                       
-                       {notice.imageUrl && (
-                          <img src={notice.imageUrl} className="w-full h-auto mb-4 rounded shadow-sm border border-stone-300 pointer-events-none" draggable="false" alt="Notice Attachment" />
-                       )}
-                       
+                       {notice.imageUrl && <img src={notice.imageUrl} className="w-full h-auto mb-4 rounded shadow-sm border border-stone-300 pointer-events-none" draggable="false" alt="Notice Attachment" />}
                        <div className="whitespace-pre-wrap font-serif text-sm leading-relaxed text-stone-800 mb-6 pointer-events-none">{notice.content}</div>
                        
                        <div className="mt-auto pt-3 border-t border-stone-300 text-[10px] uppercase tracking-widest text-stone-500 flex justify-between items-center font-sans pointer-events-none">
@@ -1257,7 +1192,11 @@ export default function App() {
           )}
         </div>
       ) : (
-        <div className="flex-1 flex flex-col relative bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-stone-800 via-stone-900 to-stone-950 min-w-0">
+        <div className="flex-1 flex flex-col relative bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-stone-800 via-stone-900 to-stone-950 min-w-0"
+             style={rooms.find(r => r.id === activeRoom)?.bgImageUrl ? { 
+                 backgroundImage: `linear-gradient(to bottom, rgba(12,10,9,0.8), rgba(28,25,23,0.9)), url(${rooms.find(r => r.id === activeRoom)?.bgImageUrl})`, 
+                 backgroundSize: 'cover', backgroundPosition: 'center' 
+             } : {}}>
           <header className="px-6 py-4 border-b border-stone-800 bg-stone-900/80 backdrop-blur-sm flex justify-between items-center shadow-md z-10 shrink-0">
             <div className="flex items-center gap-3">
               <div className="min-w-0">
@@ -1288,7 +1227,7 @@ export default function App() {
               const isMe = msg.senderId === profile.id;
               const isAdminMsg = msg.role === 'admin';
 
-              if (msg.type === 'action' || msg.type === 'combat') {
+              if (msg.type === 'action' || msg.type === 'combat' || msg.type === 'roll') {
                 return (
                   <div key={msg.id} className="flex justify-center my-4 relative group w-full">
                      {profile.role === 'admin' && (
@@ -1296,14 +1235,15 @@ export default function App() {
                           <Trash2 className="w-4 h-4" />
                         </button>
                      )}
-                    <span className={`flex flex-col items-center text-center px-6 py-3 border shadow-sm gap-2 ${msg.type === 'combat' ? 'bg-red-950/30 border-red-900/50 text-red-200 rounded-xl w-64' : 'bg-stone-950/50 border-stone-800 text-amber-500/80 italic rounded-full text-sm md:text-base'}`}>
+                    <span className={`flex flex-col items-center text-center px-6 py-3 border shadow-sm gap-2 ${(msg.type === 'combat' || msg.type === 'roll') ? 'bg-indigo-950/30 border-indigo-900/50 text-indigo-200 rounded-xl w-72 md:w-96' : 'bg-stone-950/50 border-stone-800 text-amber-500/80 italic rounded-full text-sm md:text-base'}`}>
+                      {msg.isPinned && <div className="absolute -top-2 -right-2 bg-amber-500 text-stone-900 rounded-full p-1 shadow-lg"><Pin className="w-3 h-3" /></div>}
                       <div className="flex items-center">
                         <img src={msg.avatar} className="w-6 h-6 rounded-full object-cover mr-2" alt="" />
-                        <span><span className="font-bold">{msg.sender}</span> {msg.type === 'combat' ? `challenges ${msg.targetName}!` : msg.text}</span>
+                        <span><span className="font-bold">{msg.sender}</span> {msg.type === 'combat' ? `challenges ${msg.targetName}!` : msg.type === 'roll' ? msg.text.split('\n')[0] : msg.text}</span>
                       </div>
-                      {msg.type === 'combat' && (
-                         <div className="whitespace-pre-wrap font-sans text-sm w-full pt-2 border-t border-red-900/30 mt-1">
-                           {msg.text}
+                      {(msg.type === 'combat' || msg.type === 'roll') && (
+                         <div className="whitespace-pre-wrap font-sans text-sm w-full pt-2 border-t border-indigo-900/30 mt-1 text-indigo-300">
+                           {msg.type === 'roll' ? msg.text.substring(msg.text.indexOf('\n') + 1).trim() : msg.text}
                          </div>
                       )}
                     </span>
@@ -1315,6 +1255,7 @@ export default function App() {
                 return (
                   <div key={msg.id} className={`flex flex-col max-w-[85%] md:max-w-2xl relative group ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
                     <div className="flex items-baseline gap-2 mb-1 px-1 opacity-80 w-full">
+                      {msg.isPinned && <Pin className="w-3 h-3 text-amber-500 mr-1" />}
                       <span className="text-sm mr-1">🤫</span>
                       <span className="text-sm font-bold text-fuchsia-400">
                         {isMe ? `You whispered to ${msg.targetName}` : `${msg.sender} whispers to you`}
@@ -1336,6 +1277,7 @@ export default function App() {
                 <div key={msg.id} className={`flex flex-col max-w-[85%] md:max-w-2xl relative group ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
                   <div className="flex items-baseline gap-2 mb-1 px-1 w-full">
                     {!isMe && <img src={msg.avatar} className="w-5 h-5 rounded-full object-cover mr-1" alt="" />}
+                    {msg.isPinned && <Pin className="w-3 h-3 text-amber-500 mr-1" />}
                     <span className={`text-sm font-semibold flex items-center gap-1 ${isAdminMsg ? 'text-amber-500' : isMe ? 'text-blue-400' : 'text-stone-300'}`}>
                       {msg.sender}
                       {isAdminMsg && <Crown className="w-3 h-3" />}
@@ -1379,19 +1321,15 @@ export default function App() {
                 </div>
               )}
               <div className="relative flex items-center w-full gap-2">
+                <button type="button" onClick={() => setIsPinningNextMessage(!isPinningNextMessage)} title="Pin Message Permanently"
+                   className={`p-3 rounded-xl transition-colors shadow-inner flex shrink-0 items-center justify-center ${isPinningNextMessage ? 'bg-amber-600 text-stone-900 border border-amber-500' : 'bg-stone-950 text-stone-500 border border-stone-700 hover:text-amber-500'}`}>
+                   <Pin className="w-5 h-5" />
+                </button>
                 <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onPaste={handlePaste}
                   placeholder={whisperTarget ? `Secretly tell ${whisperTarget.name}...` : `Speak in ${activeRoom === 'main-town' ? 'Main Town' : rooms.find(r => r.id === activeRoom)?.name || 'the realm'}... (Ctrl+V to paste image)`}
                   className={`w-full bg-stone-950 border text-stone-200 py-4 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner ${whisperTarget ? 'border-fuchsia-800 placeholder-fuchsia-800/50 focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500/50' : 'border-stone-700 placeholder-stone-600 focus:border-amber-600 focus:ring-1 focus:ring-amber-600/50'}`} />
-                
-                {!whisperTarget && (
-                  <button type="button" onClick={() => setIsPinned(!isPinned)}
-                    className={`p-3 rounded-xl border transition-all ${isPinned ? 'bg-amber-900 border-amber-500 text-amber-200' : 'bg-stone-800 border-stone-700 text-stone-400 hover:border-stone-500'}`} title="Pin Message">
-                    <Book className="w-5 h-5" />
-                  </button>
-                )}
-
                 <button type="submit" disabled={(!newMessage.trim() && !attachedImage) || !activeRoom}
-                  className={`p-3 rounded-xl transition-colors flex items-center justify-center shadow-md disabled:shadow-none ${whisperTarget ? 'bg-fuchsia-800 hover:bg-fuchsia-700 disabled:bg-stone-800 disabled:text-stone-600 text-fuchsia-100' : 'bg-amber-700 hover:bg-amber-600 disabled:bg-stone-800 disabled:text-stone-600 text-amber-100'}`}>
+                  className={`absolute right-2 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md disabled:shadow-none ${whisperTarget ? 'bg-fuchsia-800 hover:bg-fuchsia-700 disabled:bg-stone-800 disabled:text-stone-600 text-fuchsia-100' : 'bg-amber-700 hover:bg-amber-600 disabled:bg-stone-800 disabled:text-stone-600 text-amber-100'}`}>
                   <Send className="w-5 h-5" />
                 </button>
               </div>
@@ -1400,27 +1338,34 @@ export default function App() {
         </div>
       )}
 
-      {/* Right Sidebar */}
-      <div className="w-64 bg-stone-900 border-l border-stone-800 flex flex-col relative z-10 shadow-xl shrink-0 hidden lg:flex">
-        <div className="p-4 border-b border-stone-800 bg-stone-950/50">
-          <h2 className="text-sm font-bold text-stone-400 uppercase tracking-widest flex items-center gap-2">
-            <Users className="w-4 h-4" /> In this Room
-          </h2>
+      {/* Right Sidebar - Hidden on Notice Board and Mail Room */}
+      {activeRoom !== 'board' && activeRoom !== 'mail' && (
+        <div className="w-64 bg-stone-900 border-l border-stone-800 flex flex-col relative z-10 shadow-xl shrink-0 hidden lg:flex">
+          <div className="p-4 border-b border-stone-800 bg-stone-950/50">
+            <h2 className="text-sm font-bold text-stone-400 uppercase tracking-widest flex items-center gap-2">
+              <Users className="w-4 h-4" /> In this Room
+            </h2>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            {usersInRoom.map(p => (
+              <button key={p.id} onClick={() => { if (p.id !== profile.id) { setInteractUser(p); setEditPointsAmount(p.points || 0); } }} disabled={p.id === profile.id}
+                className={`w-full flex items-center justify-between p-3 rounded-lg text-left transition-colors border border-transparent ${p.id === profile.id ? 'opacity-50 cursor-default' : 'hover:bg-stone-800 hover:border-stone-700 cursor-pointer'}`}>
+                <div className="flex items-center gap-3 min-w-0">
+                  <img src={p.avatar} alt="avatar" className="w-8 h-8 rounded-md object-cover bg-stone-950 border border-stone-800 shadow-inner shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-semibold text-stone-200 truncate">{p.name}</div>
+                    <div className="text-xs text-stone-500 truncate">{p.charClass}</div>
+                  </div>
+                </div>
+                <div className="text-xs font-bold text-amber-500 bg-amber-900/20 px-2 py-1 rounded-full border border-amber-900/50 shrink-0">
+                  {p.points || 0} pt
+                </div>
+              </button>
+            ))}
+            {usersInRoom.length === 0 && <div className="text-stone-600 text-sm italic text-center mt-10">It is lonely here...</div>}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {usersInRoom.map(p => (
-            <button key={p.id} onClick={() => p.id !== profile.id && setInteractUser(p)} disabled={p.id === profile.id}
-              className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors border border-transparent ${p.id === profile.id ? 'opacity-50 cursor-default' : 'hover:bg-stone-800 hover:border-stone-700 cursor-pointer'}`}>
-              <img src={p.avatar} alt="avatar" className="w-8 h-8 rounded-md object-cover bg-stone-950 border border-stone-800 shadow-inner shrink-0" />
-              <div className="min-w-0">
-                <div className="font-semibold text-stone-200 truncate">{p.name}</div>
-                <div className="text-xs text-stone-500 truncate">{p.charClass}</div>
-              </div>
-            </button>
-          ))}
-          {usersInRoom.length === 0 && <div className="text-stone-600 text-sm italic text-center mt-10">It is lonely here...</div>}
-        </div>
-      </div>
+      )}
 
       {/* Interact Modal */}
       {interactUser && (
@@ -1439,67 +1384,66 @@ export default function App() {
                   {interactUser.charClass}
                   {interactUser.role === 'admin' && <Crown className="w-4 h-4 text-amber-500" />}
                 </p>
+                <div className="mt-2 text-amber-400 font-bold text-sm bg-amber-900/30 inline-block px-3 py-1 rounded-full border border-amber-900/50 shadow-inner">
+                  {interactUser.points || 0} Points
+                </div>
               </div>
               {interactUser.bio && (
                 <div className="bg-stone-950/50 p-4 rounded-lg border border-stone-800 text-sm text-stone-300 italic">"{interactUser.bio}"</div>
               )}
-              <div className="pt-4 space-y-2 border-t border-stone-800">
+
+              {profile.role === 'admin' && (
+                <div className="bg-stone-950/50 p-3 rounded-lg border border-stone-800 flex items-center justify-between gap-2">
+                  <span className="text-xs text-stone-500 uppercase font-bold tracking-widest">Admin: Set Points</span>
+                  <div className="flex gap-2">
+                     <input 
+                       type="number" 
+                       value={editPointsAmount} 
+                       onChange={e => setEditPointsAmount(Number(e.target.value))}
+                       className="w-16 bg-stone-900 border border-stone-700 p-1 rounded text-sm text-center text-stone-200 outline-none"
+                     />
+                     <button 
+                       onClick={() => handleUpdatePoints(editPointsAmount)}
+                       className="bg-amber-900/50 hover:bg-amber-800/50 text-amber-300 px-3 py-1 rounded text-sm transition-colors border border-amber-900/50 font-bold shadow-sm"
+                     >
+                       Save
+                     </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-4 space-y-4 border-t border-stone-800">
                 <button onClick={() => { setWhisperTarget(interactUser); setInteractUser(null); }}
-                  className="w-full flex items-center justify-center gap-2 bg-fuchsia-900/50 hover:bg-fuchsia-800/50 text-fuchsia-300 border border-fuchsia-900/50 py-2 rounded-lg transition-colors mb-2">
+                  className="w-full flex items-center justify-center gap-2 bg-fuchsia-900/50 hover:bg-fuchsia-800/50 text-fuchsia-300 border border-fuchsia-900/50 py-2 rounded-lg transition-colors">
                   <MessageSquare className="w-4 h-4" /> Whisper Privately
                 </button>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => handleAction('bow')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Bow</button>
-                  <button onClick={() => handleAction('cheer')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Cheer</button>
-                  <button onClick={() => handleAction('slap')} className="bg-orange-900/30 hover:bg-orange-900/50 text-orange-400 py-2 rounded-lg text-sm transition-colors border border-orange-900/50 shadow-sm">Slap</button>
-                  <button onClick={() => handleAction('duel')} className="bg-red-900/30 hover:bg-red-900/50 text-red-400 py-2 rounded-lg text-sm transition-colors border border-red-900/50 shadow-sm font-bold flex items-center justify-center gap-1"><Swords className="w-4 h-4" /> Duel</button>
+                
+                <div className="bg-stone-950/50 p-3 rounded-lg border border-stone-800 space-y-3">
+                   <div className="text-xs text-stone-500 uppercase tracking-widest font-bold">Roleplay & Actions</div>
+                   <div className="flex gap-2">
+                     <input 
+                       type="text" 
+                       value={customAction} 
+                       onChange={e => setCustomAction(e.target.value)} 
+                       placeholder="e.g. steal from, charm, intimidate..."
+                       className="flex-1 bg-stone-900 border border-stone-700 p-2 rounded text-sm text-stone-200 focus:border-indigo-500 outline-none placeholder-stone-600"
+                     />
+                     <button 
+                       onClick={() => handleAction('custom')}
+                       disabled={!customAction.trim()}
+                       className="bg-indigo-900/50 hover:bg-indigo-800/50 text-indigo-300 px-4 py-2 rounded text-sm transition-colors border border-indigo-900/50 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed font-bold"
+                     >
+                       Roll!
+                     </button>
+                   </div>
+                   <div className="grid grid-cols-3 gap-2">
+                     <button onClick={() => handleAction('bow')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Bow</button>
+                     <button onClick={() => handleAction('cheer')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Cheer</button>
+                     <button onClick={() => handleAction('slap')} className="bg-orange-900/30 hover:bg-orange-900/50 text-orange-400 py-2 rounded-lg text-sm transition-colors border border-orange-900/50 shadow-sm">Slap</button>
+                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Notice Board Creation Modal */}
-      {isAddingNotice && activeRoom === 'board' && (
-        <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-lg w-full p-6 relative flex flex-col max-h-[90vh]">
-             <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); }} className="absolute top-4 right-4 text-stone-400 hover:text-white"><X className="w-5 h-5" /></button>
-             <h3 className="text-2xl font-bold text-amber-500 mb-6 flex items-center gap-2 border-b border-stone-800 pb-4"><Scroll className="w-6 h-6" /> Post Public Decree</h3>
-             
-             <div className="space-y-5 overflow-y-auto flex-1 min-h-0 pr-2 custom-scrollbar">
-                <div>
-                  <label className="block text-sm text-stone-400 mb-1">Decree Title</label>
-                  <input type="text" value={newNoticeTitle} onChange={e => setNewNoticeTitle(e.target.value)} 
-                     className="w-full bg-stone-950 border border-stone-700 p-3 rounded-lg text-stone-200 focus:border-amber-500 outline-none shadow-inner" 
-                     placeholder="e.g. Bounty on the Black Knight" autoFocus />
-                </div>
-                <div>
-                  <label className="block text-sm text-stone-400 mb-1 flex justify-between">
-                     <span>Decree Content</span>
-                     <span className="text-amber-600/70 text-xs italic">Tip: Ctrl+V to paste an image!</span>
-                  </label>
-                  <textarea value={newNoticeContent} onChange={e => setNewNoticeContent(e.target.value)} onPaste={handleNoticeImagePaste} 
-                     className="w-full h-32 bg-stone-950 border border-stone-700 p-3 rounded-lg text-stone-200 focus:border-amber-500 outline-none resize-none shadow-inner leading-relaxed" 
-                     placeholder="Write the official decree..." />
-                </div>
-                {attachedNoticeImage && (
-                  <div>
-                     <label className="block text-sm text-stone-400 mb-1">Attached Illustration</label>
-                     <div className="relative inline-block">
-                        <img src={attachedNoticeImage} alt="Notice Attachment" className="h-40 w-auto rounded border-2 border-stone-700 shadow-md object-contain bg-stone-950" />
-                        <button onClick={() => setAttachedNoticeImage(null)} className="absolute -top-3 -right-3 bg-stone-900 border border-stone-600 rounded-full p-1.5 text-stone-400 hover:text-white hover:bg-red-900 transition-colors">
-                           <X className="w-3 h-3"/>
-                        </button>
-                     </div>
-                  </div>
-                )}
-             </div>
-             
-             <div className="flex gap-3 pt-6 border-t border-stone-800 shrink-0 mt-2">
-                <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); }} className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg transition-colors border border-stone-600">Cancel</button>
-                <button onClick={handleAddNotice} disabled={!newNoticeContent.trim() && !attachedNoticeImage} className="flex-1 py-3 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-amber-100 font-bold rounded-lg transition-colors shadow-lg uppercase tracking-wider">Pin to Board</button>
-             </div>
           </div>
         </div>
       )}
@@ -1520,7 +1464,13 @@ export default function App() {
                 <label className="block text-sm text-stone-400 mb-1">Description</label>
                 <textarea value={newRoomDesc} onChange={e => setNewRoomDesc(e.target.value)}
                   className="w-full bg-stone-950 border border-stone-700 p-3 rounded-lg text-stone-200 focus:border-amber-500 outline-none resize-none"
-                  placeholder="e.g. A damp and terrifying place..." rows={3} />
+                  placeholder="e.g. A damp and terrifying place..." rows={2} />
+              </div>
+              <div>
+                <label className="block text-sm text-stone-400 mb-1">Background Image URL (Optional)</label>
+                <input type="text" value={newRoomBgUrl} onChange={e => setNewRoomBgUrl(e.target.value)}
+                  className="w-full bg-stone-950 border border-stone-700 p-3 rounded-lg text-stone-200 focus:border-amber-500 outline-none"
+                  placeholder="e.g. https://example.com/image.jpg" />
               </div>
               <div>
                 <label className="block text-sm text-stone-400 mb-2">Room Icon</label>
