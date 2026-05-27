@@ -149,6 +149,12 @@ export default function App() {
   const [newRoomIcon, setNewRoomIcon] = useState('map');
   const [newRoomBgUrl, setNewRoomBgUrl] = useState('');
   
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
+  const [editRoomName, setEditRoomName] = useState('');
+  const [editRoomDesc, setEditRoomDesc] = useState('');
+  const [editRoomIcon, setEditRoomIcon] = useState('map');
+  const [editRoomBgUrl, setEditRoomBgUrl] = useState('');
+  
   const [characters, setCharacters] = useState<Character[]>([]);
   const [sidebarTab, setSidebarTab] = useState<'realms' | 'roster' | 'board' | 'mail'>('realms');
   
@@ -359,6 +365,39 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
+  const handleRoomBgUpload = (e: React.ChangeEvent<HTMLInputElement>, isEditing: boolean) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // Limit max size to keep it within database limits (1MB per doc)
+        const MAX_WIDTH = 1200, MAX_HEIGHT = 800;
+        let width = img.width, height = img.height;
+        
+        if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+           const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+           width *= ratio;
+           height *= ratio;
+        }
+        
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6); // Slightly lower quality for bg image to save space
+        
+        if (isEditing) setEditRoomBgUrl(dataUrl);
+        else setNewRoomBgUrl(dataUrl);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleRegisterOrEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile.username.trim() || !profile.name.trim() || !profile.passphrase.trim()) {
@@ -506,6 +545,29 @@ export default function App() {
     const roomsRef = collection(db, 'artifacts', appId, 'public', 'data', 'rooms');
     await addDoc(roomsRef, { name: newRoomName, description: newRoomDesc, iconName: newRoomIcon, bgImageUrl: newRoomBgUrl, createdAt: Date.now() });
     setIsCreatingRoom(false); setNewRoomName(''); setNewRoomDesc(''); setNewRoomIcon('map'); setNewRoomBgUrl('');
+  };
+
+  const openEditRoom = (room: Room) => {
+    setEditingRoomId(room.id);
+    setEditRoomName(room.name);
+    setEditRoomDesc(room.description);
+    setEditRoomIcon(room.iconName);
+    setEditRoomBgUrl(room.bgImageUrl || '');
+  };
+
+  const handleEditRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editRoomName.trim() || !editingRoomId) return;
+    try {
+      const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', editingRoomId);
+      await updateDoc(roomRef, {
+        name: editRoomName,
+        description: editRoomDesc,
+        iconName: editRoomIcon,
+        bgImageUrl: editRoomBgUrl
+      });
+      setEditingRoomId(null);
+    } catch (err) { console.error("Error updating room:", err); }
   };
 
   const confirmDeleteRoom = async () => {
@@ -923,10 +985,16 @@ export default function App() {
                       </div>
                     </button>
                     {profile.role === 'admin' && (
-                      <button onClick={(e) => { e.stopPropagation(); setRoomToDelete(room.id); }}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-stone-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all bg-stone-900 rounded-lg shadow-md" title="Destroy Realm">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all bg-stone-900 rounded-lg shadow-md p-1">
+                        <button onClick={(e) => { e.stopPropagation(); openEditRoom(room); }}
+                          className="p-1.5 text-stone-500 hover:text-amber-400 transition-colors" title="Edit Realm">
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setRoomToDelete(room.id); }}
+                          className="p-1.5 text-stone-500 hover:text-red-400 transition-colors" title="Destroy Realm">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
@@ -1512,10 +1580,19 @@ export default function App() {
                   placeholder="e.g. A damp and terrifying place..." rows={2} />
               </div>
               <div>
-                <label className="block text-sm text-stone-400 mb-1">Background Image URL (Optional)</label>
-                <input type="text" value={newRoomBgUrl} onChange={e => setNewRoomBgUrl(e.target.value)}
-                  className="w-full bg-stone-950 border border-stone-700 p-3 rounded-lg text-stone-200 focus:border-amber-500 outline-none"
-                  placeholder="e.g. https://example.com/image.jpg" />
+                <label className="block text-sm text-stone-400 mb-1">Background Image (Optional)</label>
+                <div className="flex flex-col gap-2">
+                   <input type="file" accept="image/*" onChange={(e) => handleRoomBgUpload(e, false)}
+                     className="w-full text-sm text-stone-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-stone-800 file:text-stone-300 hover:file:bg-stone-700 cursor-pointer border border-stone-700 rounded-lg p-2 bg-stone-950" />
+                   {newRoomBgUrl && (
+                      <div className="relative w-full h-24 rounded-lg overflow-hidden border border-stone-700 shrink-0">
+                         <img src={newRoomBgUrl} className="w-full h-full object-cover" alt="bg preview" />
+                         <button type="button" onClick={() => setNewRoomBgUrl('')} className="absolute top-1 right-1 p-1 bg-stone-900/80 rounded hover:text-red-400 backdrop-blur-sm transition-colors">
+                           <X className="w-4 h-4" />
+                         </button>
+                      </div>
+                   )}
+                </div>
               </div>
               <div>
                 <label className="block text-sm text-stone-400 mb-2">Room Icon</label>
@@ -1534,6 +1611,62 @@ export default function App() {
               <div className="flex gap-3 pt-4 border-t border-stone-800">
                 <button type="button" onClick={() => setIsCreatingRoom(false)} className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg transition-colors border border-stone-600">Cancel</button>
                 <button type="submit" disabled={!newRoomName.trim()} className="flex-1 py-3 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-amber-100 font-bold rounded-lg transition-colors shadow-lg">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Room Edit Modal */}
+      {editingRoomId && (
+        <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-sm w-full p-6 relative overflow-hidden">
+            <h3 className="text-2xl font-bold text-amber-500 mb-4 flex items-center gap-2"><Edit className="w-6 h-6" /> Edit Realm</h3>
+            <form onSubmit={handleEditRoom} className="space-y-4">
+              <div>
+                <label className="block text-sm text-stone-400 mb-1">Room Name</label>
+                <input type="text" value={editRoomName} onChange={e => setEditRoomName(e.target.value)}
+                  className="w-full bg-stone-950 border border-stone-700 p-3 rounded-lg text-stone-200 focus:border-amber-500 outline-none"
+                  placeholder="e.g. The Dungeon" autoFocus />
+              </div>
+              <div>
+                <label className="block text-sm text-stone-400 mb-1">Description</label>
+                <textarea value={editRoomDesc} onChange={e => setEditRoomDesc(e.target.value)}
+                  className="w-full bg-stone-950 border border-stone-700 p-3 rounded-lg text-stone-200 focus:border-amber-500 outline-none resize-none"
+                  placeholder="e.g. A damp and terrifying place..." rows={2} />
+              </div>
+              <div>
+                <label className="block text-sm text-stone-400 mb-1">Background Image (Optional)</label>
+                <div className="flex flex-col gap-2">
+                   <input type="file" accept="image/*" onChange={(e) => handleRoomBgUpload(e, true)}
+                     className="w-full text-sm text-stone-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-stone-800 file:text-stone-300 hover:file:bg-stone-700 cursor-pointer border border-stone-700 rounded-lg p-2 bg-stone-950" />
+                   {editRoomBgUrl && (
+                      <div className="relative w-full h-24 rounded-lg overflow-hidden border border-stone-700 shrink-0">
+                         <img src={editRoomBgUrl} className="w-full h-full object-cover" alt="bg preview" />
+                         <button type="button" onClick={() => setEditRoomBgUrl('')} className="absolute top-1 right-1 p-1 bg-stone-900/80 rounded hover:text-red-400 backdrop-blur-sm transition-colors">
+                           <X className="w-4 h-4" />
+                         </button>
+                      </div>
+                   )}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-stone-400 mb-2">Room Icon</label>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_ICONS.map(iconName => {
+                    const IconComp = ICON_MAP[iconName];
+                    return (
+                      <button key={iconName} type="button" onClick={() => setEditRoomIcon(iconName)}
+                        className={`p-3 rounded-lg border transition-all ${editRoomIcon === iconName ? 'bg-amber-900/50 border-amber-500 text-amber-400 shadow-inner' : 'bg-stone-950 border-stone-700 text-stone-500 hover:text-stone-300 hover:border-stone-500'}`}>
+                        <IconComp className="w-5 h-5" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex gap-3 pt-4 border-t border-stone-800">
+                <button type="button" onClick={() => setEditingRoomId(null)} className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg transition-colors border border-stone-600">Cancel</button>
+                <button type="submit" disabled={!editRoomName.trim()} className="flex-1 py-3 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-amber-100 font-bold rounded-lg transition-colors shadow-lg">Save</button>
               </div>
             </form>
           </div>
@@ -1568,7 +1701,6 @@ export default function App() {
                 {focusedNotice.imageUrl && (
                   <img src={focusedNotice.imageUrl} alt="Notice Attachment" className="w-full h-auto mb-8 rounded border border-stone-300 shadow-md" />
                 )}
-                
                 
                 <div className="whitespace-pre-wrap font-serif text-xl leading-relaxed text-stone-800 mb-8">{focusedNotice.content}</div>
             </div>
