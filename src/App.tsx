@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Send, Map, Swords, Crown, Beer, TreePine, LogOut, Scroll, Users, X, MessageSquare, Plus, Trash2, Book, Flame, Edit, Mail, ZoomIn, ZoomOut, Maximize, Move, Clock, Feather } from 'lucide-react';
+import { Shield, Send, Map, Swords, Crown, Beer, TreePine, LogOut, Scroll, Users, X, MessageSquare, Plus, Trash2, Book, Flame, Edit, Mail, ZoomIn, ZoomOut, Maximize, Move, Clock, Feather, Minus, Maximize2 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, doc, setDoc, deleteDoc, getDoc, updateDoc } from 'firebase/firestore';
@@ -87,6 +87,7 @@ interface Notice {
   x?: number;
   y?: number;
   zIndex?: number;
+  scale?: number;
 }
 
 interface MailMessage {
@@ -156,6 +157,7 @@ export default function MedievalChatApp() {
   const [newNoticeTitle, setNewNoticeTitle] = useState('');
   const [newNoticeContent, setNewNoticeContent] = useState('');
   const [attachedNoticeImage, setAttachedNoticeImage] = useState<string | null>(null);
+  const [focusedNotice, setFocusedNotice] = useState<Notice | null>(null);
   
   // Infinite Canvas State
   const boardRef = useRef<HTMLDivElement>(null);
@@ -436,7 +438,7 @@ export default function MedievalChatApp() {
       const isAdmin = profile.role === 'admin';
       if (!isMyWhisper && !isAdmin) return false;
     }
-    if (profile.role === 'admin') return true;
+    if (profile.role === 'admin' || activeRoom === 'main-town') return true;
     return msg.timestamp >= roomEntryTime;
   });
 
@@ -666,6 +668,20 @@ export default function MedievalChatApp() {
     catch (err) { console.error(err); }
   };
 
+  const handleScaleNotice = async (notice: Notice, delta: number) => {
+    const newScale = Math.max(0.5, Math.min((notice.scale || 1) + delta, 3));
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'board', notice.id), { scale: newScale });
+    } catch (err) { console.error("Error scaling notice:", err); }
+  };
+
+  const handleDeleteMessage = async (msgId: string) => {
+    if (profile.role !== 'admin') return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId));
+    } catch (err) { console.error("Error deleting message:", err); }
+  };
+
   const handleSendMail = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeMailTarget || !mailContent.trim() || activeMailTarget.id === 'ALL') return;
@@ -713,12 +729,9 @@ export default function MedievalChatApp() {
       timestamp: Date.now()
     };
 
-    if (type === 'whisper') {
+    if (type === 'whisper' || type === 'action' || type === 'combat') {
       payload.targetId = customTarget?.id || whisperTarget?.id;
       payload.targetName = customTarget?.name || whisperTarget?.name;
-    } else if (type === 'action') {
-      payload.targetId = customTarget?.id;
-      payload.targetName = customTarget?.name;
     }
 
     await addDoc(messagesRef, payload);
@@ -741,13 +754,27 @@ export default function MedievalChatApp() {
   const handleAction = async (actionType: string) => {
     if (!interactUser) return;
     let actionText = '';
+    let msgType = 'action';
+
     switch (actionType) {
       case 'bow': actionText = `bows deeply to ${interactUser.name}.`; break;
       case 'cheer': actionText = `raises a frothy tankard to ${interactUser.name}!`; break;
       case 'slap': actionText = `slaps ${interactUser.name} across the face! Have at thee!`; break;
+      case 'duel':
+        const myRoll = Math.floor(Math.random() * 20) + 1;
+        const theirRoll = Math.floor(Math.random() * 20) + 1;
+        let resultText = '';
+        if (myRoll > theirRoll) resultText = `🏆 ${profile.name} is victorious!`;
+        else if (theirRoll > myRoll) resultText = `☠️ ${profile.name} was defeated!`;
+        else resultText = `🤝 It is a draw!`;
+        
+        actionText = `⚔️ Rolled a ${myRoll}\n🛡️ ${interactUser.name} rolled a ${theirRoll}\n\n${resultText}`;
+        msgType = 'combat';
+        break;
       default: actionText = `looks at ${interactUser.name}.`;
     }
-    await sendMessage(actionText, 'action', interactUser);
+
+    await sendMessage(actionText, msgType, interactUser);
     setInteractUser(null);
   };
 
@@ -1027,7 +1054,7 @@ export default function MedievalChatApp() {
         </div>
       </div>
 
-      {}
+      {/* Main Views Container */}
       {activeRoom === 'board' ? (
         <div className="flex-1 flex flex-col relative bg-stone-950 min-w-0 overflow-hidden select-none">
           {/* Zoom Controls */}
@@ -1077,31 +1104,36 @@ export default function MedievalChatApp() {
                 {infoBoard.map(notice => {
                   const isDraggingThis = draggedNotice?.id === notice.id;
                   const canEdit = profile.role === 'admin' || notice.authorId === profile.id;
+                  const currentScale = (notice.scale || 1) * (isDraggingThis && canEdit ? 1.05 : 1);
                   
                   return (
                     <div 
                       key={notice.id} 
                       onPointerDown={(e) => handleNoticePointerDown(e, notice)}
-                      className={`absolute w-80 bg-[#fdf5e6] text-stone-900 p-6 shadow-2xl border border-[#d4c4a8] ${canEdit ? (isDraggingThis ? 'cursor-grabbing scale-105 z-50' : 'cursor-grab hover:-translate-y-1 z-10 hover:z-30') : 'z-10'} transition-transform duration-150 group`}
+                      className={`absolute w-80 bg-[#fdf5e6] text-stone-900 p-6 shadow-2xl border border-[#d4c4a8] ${canEdit ? (isDraggingThis ? 'cursor-grabbing z-50' : 'cursor-grab hover:z-30') : 'z-10'} transition-all duration-150 group`}
                       style={{ 
                          left: notice.x || 0, 
                          top: notice.y || 0,
-                         transformOrigin: 'center',
+                         transformOrigin: 'top left',
+                         transform: `scale(${currentScale})`,
                       }}
                     >
                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-red-800 shadow-[0_2px_4px_rgba(0,0,0,0.5)] border border-red-950 z-20 pointer-events-none">
                           <div className="absolute top-1 left-1 w-1 h-1 bg-white/40 rounded-full"></div>
                        </div>
                        
-                       {canEdit && (
-                          <button 
-                            onPointerDown={(e) => e.stopPropagation()} // prevent dragging when clicking delete
-                            onClick={() => handleDeleteNotice(notice.id)} 
-                            className="absolute top-2 right-2 text-stone-500 hover:text-red-600 p-1.5 hover:bg-stone-200/50 rounded-full transition-colors z-20 opacity-0 group-hover:opacity-100"
-                          >
-                             <Trash2 className="w-4 h-4" />
-                          </button>
-                       )}
+                       <div className="absolute top-2 right-2 flex bg-stone-900/90 backdrop-blur-sm rounded-lg p-1 opacity-0 group-hover:opacity-100 transition-opacity z-30 shadow-md border border-stone-700 pointer-events-auto" onPointerDown={e => e.stopPropagation()}>
+                          {canEdit && (
+                             <>
+                               <button onClick={() => handleScaleNotice(notice, 0.2)} className="p-1.5 text-stone-400 hover:text-amber-400 hover:bg-stone-800 rounded transition-colors" title="Increase Size"><Plus className="w-4 h-4" /></button>
+                               <button onClick={() => handleScaleNotice(notice, -0.2)} className="p-1.5 text-stone-400 hover:text-amber-400 hover:bg-stone-800 rounded transition-colors" title="Decrease Size"><Minus className="w-4 h-4" /></button>
+                               <div className="w-px bg-stone-700 mx-1 my-1"></div>
+                               <button onClick={() => handleDeleteNotice(notice.id)} className="p-1.5 text-stone-400 hover:text-red-500 hover:bg-stone-800 rounded transition-colors" title="Burn Decree"><Trash2 className="w-4 h-4" /></button>
+                               <div className="w-px bg-stone-700 mx-1 my-1"></div>
+                             </>
+                          )}
+                          <button onClick={() => setFocusedNotice(notice)} className="p-1.5 text-stone-400 hover:text-amber-400 hover:bg-stone-800 rounded transition-colors" title="Read Focus"><Maximize2 className="w-4 h-4" /></button>
+                       </div>
                        
                        <h3 className="font-bold text-xl mb-3 text-stone-800 font-serif border-b border-stone-300 pb-2 pointer-events-none">{notice.title}</h3>
                        
@@ -1167,7 +1199,7 @@ export default function MedievalChatApp() {
                   const showTarget = activeMailTarget.id === 'ALL';
                   
                   return (
-                    <div key={msg.id} className={`flex flex-col max-w-[85%] md:max-w-2xl ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
+                    <div key={msg.id} className={`flex flex-col max-w-[85%] md:max-w-2xl group relative ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
                       <div className="flex items-baseline gap-2 mb-1 px-1">
                         <span className={`text-sm font-semibold flex items-center gap-1 ${isMe ? 'text-indigo-400' : 'text-stone-400'}`}>
                           {msg.senderName} {showTarget && <span className="text-stone-600 mx-1">→</span>} {showTarget && msg.targetName}
@@ -1175,6 +1207,11 @@ export default function MedievalChatApp() {
                         <span className="text-xs text-stone-600 font-sans">
                           {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
+                        {profile.role === 'admin' && (
+                          <button onClick={() => handleDeleteMessage(msg.id)} className="ml-2 opacity-0 group-hover:opacity-100 text-stone-600 hover:text-red-400 transition-opacity">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
                       <div className={`px-5 py-3 rounded-2xl shadow-lg relative font-serif italic ${isMe ? 'bg-indigo-950/40 border border-indigo-800/50 text-indigo-100 rounded-tr-none' : 'bg-stone-900 border border-stone-700 text-stone-300 rounded-tl-none'}`}>
                         "{msg.content}"
@@ -1243,12 +1280,24 @@ export default function MedievalChatApp() {
               const isMe = msg.senderId === profile.id;
               const isAdminMsg = msg.role === 'admin';
 
-              if (msg.type === 'action') {
+              if (msg.type === 'action' || msg.type === 'combat') {
                 return (
-                  <div key={msg.id} className="flex justify-center my-4">
-                    <span className="flex items-center text-amber-500/80 italic text-sm md:text-base px-6 py-2 bg-stone-950/50 rounded-full border border-stone-800 shadow-sm">
-                      <img src={msg.avatar} className="w-6 h-6 rounded-full object-cover mr-2" alt="" />
-                      <span><span className="font-bold">{msg.sender}</span> {msg.text}</span>
+                  <div key={msg.id} className="flex justify-center my-4 relative group w-full">
+                     {profile.role === 'admin' && (
+                        <button onClick={() => handleDeleteMessage(msg.id)} className="absolute right-4 md:right-1/4 top-1/2 -translate-y-1/2 p-1 text-stone-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                     )}
+                    <span className={`flex flex-col items-center text-center px-6 py-3 border shadow-sm gap-2 ${msg.type === 'combat' ? 'bg-red-950/30 border-red-900/50 text-red-200 rounded-xl w-64' : 'bg-stone-950/50 border-stone-800 text-amber-500/80 italic rounded-full text-sm md:text-base'}`}>
+                      <div className="flex items-center">
+                        <img src={msg.avatar} className="w-6 h-6 rounded-full object-cover mr-2" alt="" />
+                        <span><span className="font-bold">{msg.sender}</span> {msg.type === 'combat' ? `challenges ${msg.targetName}!` : msg.text}</span>
+                      </div>
+                      {msg.type === 'combat' && (
+                         <div className="whitespace-pre-wrap font-sans text-sm w-full pt-2 border-t border-red-900/30 mt-1">
+                           {msg.text}
+                         </div>
+                      )}
                     </span>
                   </div>
                 );
@@ -1256,12 +1305,17 @@ export default function MedievalChatApp() {
 
               if (msg.type === 'whisper') {
                 return (
-                  <div key={msg.id} className={`flex flex-col max-w-[85%] md:max-w-2xl ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
-                    <div className="flex items-baseline gap-2 mb-1 px-1 opacity-80">
+                  <div key={msg.id} className={`flex flex-col max-w-[85%] md:max-w-2xl relative group ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
+                    <div className="flex items-baseline gap-2 mb-1 px-1 opacity-80 w-full">
                       <span className="text-sm mr-1">🤫</span>
                       <span className="text-sm font-bold text-fuchsia-400">
                         {isMe ? `You whispered to ${msg.targetName}` : `${msg.sender} whispers to you`}
                       </span>
+                      {profile.role === 'admin' && (
+                        <button onClick={() => handleDeleteMessage(msg.id)} className="ml-auto opacity-0 group-hover:opacity-100 text-stone-600 hover:text-red-400 transition-opacity">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                     <div className={`px-5 py-3 rounded-2xl shadow-lg relative bg-fuchsia-950/40 border border-fuchsia-800/50 text-fuchsia-100 italic ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
                       "{msg.text}"
@@ -1271,8 +1325,8 @@ export default function MedievalChatApp() {
               }
 
               return (
-                <div key={msg.id} className={`flex flex-col max-w-[85%] md:max-w-2xl ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
-                  <div className="flex items-baseline gap-2 mb-1 px-1">
+                <div key={msg.id} className={`flex flex-col max-w-[85%] md:max-w-2xl relative group ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
+                  <div className="flex items-baseline gap-2 mb-1 px-1 w-full">
                     {!isMe && <img src={msg.avatar} className="w-5 h-5 rounded-full object-cover mr-1" alt="" />}
                     <span className={`text-sm font-semibold flex items-center gap-1 ${isAdminMsg ? 'text-amber-500' : isMe ? 'text-blue-400' : 'text-stone-300'}`}>
                       {msg.sender}
@@ -1281,6 +1335,11 @@ export default function MedievalChatApp() {
                     <span className="text-xs text-stone-500 font-sans">
                       {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
+                    {profile.role === 'admin' && (
+                      <button onClick={() => handleDeleteMessage(msg.id)} className="ml-auto opacity-0 group-hover:opacity-100 text-stone-600 hover:text-red-400 transition-opacity">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                   <div className={`px-5 py-3 rounded-2xl shadow-lg relative ${isAdminMsg ? 'bg-amber-900/40 border border-amber-700/50 text-amber-100 rounded-tl-none' : isMe ? 'bg-stone-700 border border-stone-600 text-stone-100 rounded-tr-none' : 'bg-stone-800 border border-stone-700 text-stone-200 rounded-tl-none'}`}>
                     {msg.text && <div>{msg.text}</div>}
@@ -1325,7 +1384,6 @@ export default function MedievalChatApp() {
         </div>
       )}
 
-      {}
       {/* Right Sidebar */}
       <div className="w-64 bg-stone-900 border-l border-stone-800 flex flex-col relative z-10 shadow-xl shrink-0 hidden lg:flex">
         <div className="p-4 border-b border-stone-800 bg-stone-950/50">
@@ -1371,13 +1429,14 @@ export default function MedievalChatApp() {
               )}
               <div className="pt-4 space-y-2 border-t border-stone-800">
                 <button onClick={() => { setWhisperTarget(interactUser); setInteractUser(null); }}
-                  className="w-full flex items-center justify-center gap-2 bg-fuchsia-900/50 hover:bg-fuchsia-800/50 text-fuchsia-300 border border-fuchsia-900/50 py-2 rounded-lg transition-colors">
+                  className="w-full flex items-center justify-center gap-2 bg-fuchsia-900/50 hover:bg-fuchsia-800/50 text-fuchsia-300 border border-fuchsia-900/50 py-2 rounded-lg transition-colors mb-2">
                   <MessageSquare className="w-4 h-4" /> Whisper Privately
                 </button>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <button onClick={() => handleAction('bow')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Bow</button>
                   <button onClick={() => handleAction('cheer')} className="bg-stone-800 hover:bg-stone-700 text-stone-300 py-2 rounded-lg text-sm transition-colors border border-stone-700 shadow-sm">Cheer</button>
-                  <button onClick={() => handleAction('slap')} className="bg-red-900/30 hover:bg-red-900/50 text-red-400 py-2 rounded-lg text-sm transition-colors border border-red-900/50 shadow-sm">Slap</button>
+                  <button onClick={() => handleAction('slap')} className="bg-orange-900/30 hover:bg-orange-900/50 text-orange-400 py-2 rounded-lg text-sm transition-colors border border-orange-900/50 shadow-sm">Slap</button>
+                  <button onClick={() => handleAction('duel')} className="bg-red-900/30 hover:bg-red-900/50 text-red-400 py-2 rounded-lg text-sm transition-colors border border-red-900/50 shadow-sm font-bold flex items-center justify-center gap-1"><Swords className="w-4 h-4" /> Duel</button>
                 </div>
               </div>
             </div>
@@ -1485,7 +1544,30 @@ export default function MedievalChatApp() {
           </div>
         </div>
       )}
+
+      {/* Focused Notice Modal */}
+      {focusedNotice && (
+        <div className="absolute inset-0 bg-stone-950/90 backdrop-blur-md z-[70] flex items-center justify-center p-4" onPointerDown={() => setFocusedNotice(null)}>
+          <div className="bg-[#fdf5e6] border border-[#d4c4a8] rounded shadow-2xl max-w-3xl w-full p-8 md:p-12 relative flex flex-col max-h-[90vh]" onPointerDown={e => e.stopPropagation()}>
+            <button onClick={() => setFocusedNotice(null)} className="absolute top-4 right-4 text-stone-400 hover:text-stone-800 transition-colors bg-stone-200/50 hover:bg-stone-300 p-2 rounded-full"><X className="w-6 h-6" /></button>
+            
+            <div className="overflow-y-auto flex-1 min-h-0 pr-4 custom-scrollbar">
+                <h2 className="text-4xl font-bold text-stone-900 mb-6 font-serif border-b-2 border-stone-300 pb-4 pr-8">{focusedNotice.title}</h2>
+                
+                {focusedNotice.imageUrl && (
+                  <img src={focusedNotice.imageUrl} alt="Notice Attachment" className="w-full h-auto mb-8 rounded border border-stone-300 shadow-md" />
+                )}
+                
+                <div className="whitespace-pre-wrap font-serif text-xl leading-relaxed text-stone-800 mb-8">{focusedNotice.content}</div>
+            </div>
+            
+            <div className="mt-4 pt-4 border-t-2 border-stone-300 text-sm uppercase tracking-widest text-stone-500 flex justify-between items-center font-sans shrink-0">
+                <span>Signed, {focusedNotice.author}</span>
+                <span>{new Date(focusedNotice.timestamp).toLocaleDateString()}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-    
   );
 }
