@@ -102,6 +102,7 @@ interface MailMessage {
   targetId: string;
   targetName: string;
   content: string;
+  imageUrl?: string | null;
   timestamp: number;
 }
 
@@ -178,6 +179,7 @@ export default function App() {
   const [mails, setMails] = useState<MailMessage[]>([]);
   const [activeMailTarget, setActiveMailTarget] = useState<Character | {id: string, name: string} | null>(null);
   const [mailContent, setMailContent] = useState('');
+  const [attachedMailImage, setAttachedMailImage] = useState<string | null>(null);
   const [mailCooldown, setMailCooldown] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -648,9 +650,40 @@ export default function App() {
     catch (err) { console.error("Error deleting message:", err); }
   };
 
+  const handleMailPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const blob = items[i].getAsFile();
+        if (!blob) break;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 500;
+            let width = img.width, height = img.height;
+            if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+            canvas.width = width; canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.drawImage(img, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+            setAttachedMailImage(dataUrl);
+          };
+          img.src = event.target?.result as string;
+        };
+        reader.readAsDataURL(blob);
+        e.preventDefault();
+        break;
+      }
+    }
+  };
+
   const handleSendMail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeMailTarget || !mailContent.trim() || activeMailTarget.id === 'ALL') return;
+    if (!activeMailTarget || (!mailContent.trim() && !attachedMailImage) || activeMailTarget.id === 'ALL') return;
     const lastSent = parseInt(localStorage.getItem('medieval_last_mail_time') || '0');
     const now = Date.now();
     
@@ -658,9 +691,10 @@ export default function App() {
     
     try {
       const mailRef = collection(db, 'artifacts', appId, 'public', 'data', 'mail');
-      await addDoc(mailRef, { senderId: profile.id, senderName: profile.name, targetId: activeMailTarget.id, targetName: activeMailTarget.name, content: mailContent, timestamp: now });
+      await addDoc(mailRef, { senderId: profile.id, senderName: profile.name, targetId: activeMailTarget.id, targetName: activeMailTarget.name, content: mailContent, imageUrl: attachedMailImage, timestamp: now });
       localStorage.setItem('medieval_last_mail_time', now.toString());
       setMailContent('');
+      setAttachedMailImage(null);
       setMailCooldown(60);
     } catch (err) { console.error("Error sending mail:", err); }
   };
@@ -1157,7 +1191,8 @@ export default function App() {
                         )}
                       </div>
                       <div className={`px-5 py-3 rounded-2xl shadow-lg relative font-serif italic ${isMe ? 'bg-indigo-950/40 border border-indigo-800/50 text-indigo-100 rounded-tr-none' : 'bg-stone-900 border border-stone-700 text-stone-300 rounded-tl-none'}`}>
-                        "{msg.content}"
+                        {msg.content && <div>"{msg.content}"</div>}
+                        {msg.imageUrl && <img src={msg.imageUrl} alt="attached raven" className="mt-2 max-w-full rounded-lg border border-indigo-500/30 shadow-sm" />}
                       </div>
                     </div>
                   );
@@ -1178,14 +1213,24 @@ export default function App() {
                   <span className="text-xl font-mono font-bold bg-red-900/50 px-3 py-1 rounded-lg">{mailCooldown}s</span>
                 </div>
               ) : (
-                <form onSubmit={handleSendMail} className="max-w-4xl mx-auto relative flex items-center w-full">
-                  <input type="text" value={mailContent} onChange={(e) => setMailContent(e.target.value)}
-                    placeholder={`Pen a letter to ${activeMailTarget.name}...`}
-                    className="w-full bg-stone-900 border border-indigo-900/50 text-stone-200 py-4 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner placeholder-stone-600 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600/50" />
-                  <button type="submit" disabled={!mailContent.trim()}
-                    className="absolute right-2 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md bg-indigo-700 hover:bg-indigo-600 disabled:bg-stone-800 disabled:text-stone-600 text-indigo-100 disabled:shadow-none">
-                    <Feather className="w-5 h-5" />
-                  </button>
+                <form onSubmit={handleSendMail} className="max-w-4xl mx-auto relative flex flex-col gap-2 w-full">
+                  {attachedMailImage && (
+                    <div className="relative self-start mb-2 ml-2">
+                      <img src={attachedMailImage} alt="attached preview" className="h-24 w-auto rounded-lg border-2 border-indigo-900/50 shadow-md object-contain bg-stone-950" />
+                      <button type="button" onClick={() => setAttachedMailImage(null)} className="absolute -top-3 -right-3 bg-stone-900 border border-stone-600 rounded-full p-1.5 text-stone-400 hover:text-white hover:bg-red-900 transition-colors">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                  <div className="relative flex items-center w-full">
+                    <input type="text" value={mailContent} onChange={(e) => setMailContent(e.target.value)} onPaste={handleMailPaste}
+                      placeholder={`Pen a letter to ${activeMailTarget.name}... (Ctrl+V to paste image)`}
+                      className="w-full bg-stone-900 border border-indigo-900/50 text-stone-200 py-4 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner placeholder-stone-600 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600/50" />
+                    <button type="submit" disabled={!mailContent.trim() && !attachedMailImage}
+                      className="absolute right-2 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md bg-indigo-700 hover:bg-indigo-600 disabled:bg-stone-800 disabled:text-stone-600 text-indigo-100 disabled:shadow-none">
+                      <Feather className="w-5 h-5" />
+                    </button>
+                  </div>
                 </form>
               )}
             </div>
@@ -1370,14 +1415,14 @@ export default function App() {
       {/* Interact Modal */}
       {interactUser && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-sm w-full relative overflow-hidden">
-            <div className="h-24 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-stone-700 via-stone-800 to-stone-900 flex items-end justify-center pb-4 relative">
+          <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-sm w-full relative flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="h-24 shrink-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-stone-700 via-stone-800 to-stone-900 flex items-end justify-center pb-4 relative">
               <button onClick={() => setInteractUser(null)} className="absolute top-4 right-4 text-stone-400 hover:text-white"><X className="w-5 h-5" /></button>
               <div className="absolute -bottom-8 w-20 h-20 bg-stone-950 p-1 rounded-full border-4 border-stone-900 shadow-xl">
                 <img src={interactUser.avatar} alt="avatar" className="w-full h-full rounded-full object-cover" />
               </div>
             </div>
-            <div className="pt-12 pb-6 px-6 text-center space-y-4">
+            <div className="pt-12 pb-6 px-6 text-center space-y-4 overflow-y-auto custom-scrollbar flex-1">
               <div>
                 <h3 className="text-2xl font-bold text-amber-500">{interactUser.name}</h3>
                 <p className="text-stone-400 text-sm uppercase tracking-wider flex items-center justify-center gap-2">
