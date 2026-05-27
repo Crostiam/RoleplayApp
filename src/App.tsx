@@ -731,16 +731,34 @@ export default function App() {
   const sendMessage = async (text: string, type = 'chat', customTarget: PresenceUser | Character | null = null) => {
     if (!user || !profile.id) return;
     const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
-    const payload: Partial<Message> = {
-      roomId: activeRoom ?? undefined, sender: profile.name, senderId: profile.id, role: profile.role,
-      avatar: profile.avatar, text, imageUrl: attachedImage, type, timestamp: Date.now(), isPinned: isPinningNextMessage
+    
+    const payload: any = {
+      roomId: activeRoom || 'main-town', 
+      sender: profile.name, 
+      senderId: profile.id, 
+      role: profile.role,
+      avatar: profile.avatar, 
+      text, 
+      imageUrl: attachedImage || null, 
+      type, 
+      timestamp: Date.now(), 
+      isPinned: isPinningNextMessage
     };
-    if (type === 'whisper' || type === 'action' || type === 'roll') {
-      payload.targetId = customTarget?.id || whisperTarget?.id;
-      payload.targetName = customTarget?.name || whisperTarget?.name;
+
+    const targetId = customTarget?.id || whisperTarget?.id;
+    const targetName = customTarget?.name || whisperTarget?.name;
+    
+    if (targetId && targetName) {
+      payload.targetId = targetId;
+      payload.targetName = targetName;
     }
-    await addDoc(messagesRef, payload);
-    setAttachedImage(null);
+
+    try {
+      await addDoc(messagesRef, payload);
+      setAttachedImage(null);
+    } catch (error) {
+      console.error("Message Error:", error);
+    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
