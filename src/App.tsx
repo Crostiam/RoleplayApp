@@ -161,6 +161,7 @@ export default function App() {
   const [newNoticeContent, setNewNoticeContent] = useState('');
   const [attachedNoticeImage, setAttachedNoticeImage] = useState<string | null>(null);
   const [focusedNotice, setFocusedNotice] = useState<Notice | null>(null);
+  const [editingNoticeId, setEditingNoticeId] = useState<string | null>(null);
   
   const boardRef = useRef<HTMLDivElement>(null);
   const [boardTransform, setBoardTransform] = useState({ x: 0, y: 0, scale: 1 });
@@ -638,16 +639,25 @@ export default function App() {
   const handleAddNotice = async () => {
     if (!newNoticeContent.trim() && !attachedNoticeImage) return;
     try {
-      const boardRef = collection(db, 'artifacts', appId, 'public', 'data', 'board');
-      const screenCenterX = window.innerWidth / 2;
-      const screenCenterY = window.innerHeight / 2;
-      const initialX = (screenCenterX - boardTransform.x) / boardTransform.scale;
-      const initialY = (screenCenterY - boardTransform.y) / boardTransform.scale;
-      await addDoc(boardRef, { 
-        title: newNoticeTitle || 'Public Decree', content: newNoticeContent, imageUrl: attachedNoticeImage,
-        timestamp: Date.now(), author: profile.name, authorId: profile.id, x: initialX, y: initialY
-      });
-      setIsAddingNotice(false); setNewNoticeTitle(''); setNewNoticeContent(''); setAttachedNoticeImage(null);
+      if (editingNoticeId) {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'board', editingNoticeId);
+        await updateDoc(docRef, { 
+          title: newNoticeTitle || 'Public Decree', 
+          content: newNoticeContent, 
+          imageUrl: attachedNoticeImage
+        });
+      } else {
+        const boardRef = collection(db, 'artifacts', appId, 'public', 'data', 'board');
+        const screenCenterX = window.innerWidth / 2;
+        const screenCenterY = window.innerHeight / 2;
+        const initialX = (screenCenterX - boardTransform.x) / boardTransform.scale;
+        const initialY = (screenCenterY - boardTransform.y) / boardTransform.scale;
+        await addDoc(boardRef, { 
+          title: newNoticeTitle || 'Public Decree', content: newNoticeContent, imageUrl: attachedNoticeImage,
+          timestamp: Date.now(), author: profile.name, authorId: profile.id, x: initialX, y: initialY
+        });
+      }
+      setIsAddingNotice(false); setNewNoticeTitle(''); setNewNoticeContent(''); setAttachedNoticeImage(null); setEditingNoticeId(null);
     } catch (err) { console.error("Error saving board:", err); }
   };
 
@@ -1135,6 +1145,7 @@ export default function App() {
                                <button onClick={() => handleScaleNotice(notice, 0.2)} className="p-1.5 text-stone-400 hover:text-amber-400 hover:bg-stone-800 rounded transition-colors" title="Increase Size"><Plus className="w-4 h-4" /></button>
                                <button onClick={() => handleScaleNotice(notice, -0.2)} className="p-1.5 text-stone-400 hover:text-amber-400 hover:bg-stone-800 rounded transition-colors" title="Decrease Size"><Minus className="w-4 h-4" /></button>
                                <div className="w-px bg-stone-700 mx-1 my-1"></div>
+                               <button onClick={() => { setEditingNoticeId(notice.id); setNewNoticeTitle(notice.title); setNewNoticeContent(notice.content); setAttachedNoticeImage(notice.imageUrl || null); setIsAddingNotice(true); }} className="p-1.5 text-stone-400 hover:text-blue-400 hover:bg-stone-800 rounded transition-colors" title="Edit Decree"><Edit className="w-4 h-4" /></button>
                                <button onClick={() => handleDeleteNotice(notice.id)} className="p-1.5 text-stone-400 hover:text-red-500 hover:bg-stone-800 rounded transition-colors" title="Burn Decree"><Trash2 className="w-4 h-4" /></button>
                                <div className="w-px bg-stone-700 mx-1 my-1"></div>
                              </>
@@ -1635,8 +1646,8 @@ export default function App() {
       {isAddingNotice && activeRoom === 'board' && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-lg w-full p-6 relative flex flex-col max-h-[90vh]">
-             <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); setNewNoticeTitle(''); setNewNoticeContent(''); }} className="absolute top-4 right-4 text-stone-400 hover:text-white"><X className="w-5 h-5" /></button>
-             <h3 className="text-2xl font-bold text-amber-500 mb-6 flex items-center gap-2 border-b border-stone-800 pb-4"><Scroll className="w-6 h-6" /> Post Public Decree</h3>
+             <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); setNewNoticeTitle(''); setNewNoticeContent(''); setEditingNoticeId(null); }} className="absolute top-4 right-4 text-stone-400 hover:text-white"><X className="w-5 h-5" /></button>
+             <h3 className="text-2xl font-bold text-amber-500 mb-6 flex items-center gap-2 border-b border-stone-800 pb-4"><Scroll className="w-6 h-6" /> {editingNoticeId ? 'Edit Public Decree' : 'Post Public Decree'}</h3>
              
              <div className="space-y-5 overflow-y-auto flex-1 min-h-0 pr-2 custom-scrollbar">
                 <div>
@@ -1668,8 +1679,8 @@ export default function App() {
              </div>
              
              <div className="flex gap-3 pt-6 border-t border-stone-800 shrink-0 mt-2">
-                <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); setNewNoticeTitle(''); setNewNoticeContent(''); }} className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg transition-colors border border-stone-600">Cancel</button>
-                <button onClick={handleAddNotice} disabled={!newNoticeContent.trim() && !attachedNoticeImage} className="flex-1 py-3 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-amber-100 font-bold rounded-lg transition-colors shadow-lg uppercase tracking-wider">Pin to Board</button>
+                <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); setNewNoticeTitle(''); setNewNoticeContent(''); setEditingNoticeId(null); }} className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg transition-colors border border-stone-600">Cancel</button>
+                <button onClick={handleAddNotice} disabled={!newNoticeContent.trim() && !attachedNoticeImage} className="flex-1 py-3 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-amber-100 font-bold rounded-lg transition-colors shadow-lg uppercase tracking-wider">{editingNoticeId ? 'Update Decree' : 'Pin to Board'}</button>
              </div>
           </div>
         </div>
