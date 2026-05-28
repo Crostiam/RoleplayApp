@@ -102,6 +102,7 @@ interface MailMessage {
   content: string;
   imageUrl?: string | null;
   timestamp: number;
+  isRead?: boolean;
 }
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -320,9 +321,25 @@ export default function App() {
     return () => clearInterval(heartbeat);
   }, [user, isJoined, profile, activeRoom]);
 
+  // Mark Mail as Read Effect
+  useEffect(() => {
+    if (activeRoom === 'mail' && activeMailTarget && activeMailTarget.id !== 'ALL') {
+      const unreadMessages = mails.filter(m => m.targetId === profile.id && m.senderId === activeMailTarget.id && !m.isRead);
+      if (unreadMessages.length > 0) {
+        unreadMessages.forEach(async (msg) => {
+          try {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'mail', msg.id), { isRead: true });
+          } catch (e) { console.error("Error marking mail as read:", e); }
+        });
+      }
+    }
+  }, [activeRoom, activeMailTarget, mails, profile.id]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, mails, activeRoom, activeMailTarget]);
+
+  const totalUnreadCount = mails.filter(m => m.targetId === profile.id && !m.isRead).length;
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -675,12 +692,6 @@ export default function App() {
     catch (err) { console.error("Error scaling notice:", err); }
   };
 
-  const handleDeleteMessage = async (msgId: string) => {
-    if (profile.role !== 'admin') return;
-    try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId)); }
-    catch (err) { console.error("Error deleting message:", err); }
-  };
-
   const handleMailPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -722,12 +733,27 @@ export default function App() {
     
     try {
       const mailRef = collection(db, 'artifacts', appId, 'public', 'data', 'mail');
-      await addDoc(mailRef, { senderId: profile.id, senderName: profile.name, targetId: activeMailTarget.id, targetName: activeMailTarget.name, content: mailContent, imageUrl: attachedMailImage, timestamp: now });
+      await addDoc(mailRef, { 
+        senderId: profile.id, 
+        senderName: profile.name, 
+        targetId: activeMailTarget.id, 
+        targetName: activeMailTarget.name, 
+        content: mailContent, 
+        imageUrl: attachedMailImage, 
+        timestamp: now,
+        isRead: false
+      });
       localStorage.setItem('medieval_last_mail_time', now.toString());
       setMailContent('');
       setAttachedMailImage(null);
       setMailCooldown(60);
     } catch (err) { console.error("Error sending mail:", err); }
+  };
+
+  const handleDeleteMessage = async (msgId: string) => {
+    if (profile.role !== 'admin') return;
+    try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId)); }
+    catch (err) { console.error("Error deleting message:", err); }
   };
 
   const sendMessage = async (text: string, type = 'chat', customTarget: PresenceUser | Character | null = null) => {
@@ -818,7 +844,7 @@ export default function App() {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'characters', interactUser.id), { points: newPoints });
       try {
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'presence', interactUser.id), { points: newPoints });
-      } catch (e) { /* user might be offline/missing presence doc */ }
+      } catch (e) { /* ignore */ }
       setInteractUser({ ...interactUser, points: newPoints });
     } catch (err) { console.error("Error updating points:", err); }
   };
@@ -931,8 +957,11 @@ export default function App() {
             const Icon = icons[i];
             return (
               <button key={tab} onClick={() => setSidebarTab(tab)}
-                className={`flex-1 py-4 border-b-2 flex items-center justify-center transition-colors ${sidebarTab === tab ? 'border-amber-500 text-amber-500 bg-stone-900' : 'border-transparent text-stone-500 hover:text-stone-300 hover:bg-stone-900/50'}`}>
+                className={`relative flex-1 py-4 border-b-2 flex items-center justify-center transition-colors ${sidebarTab === tab ? 'border-amber-500 text-amber-500 bg-stone-900' : 'border-transparent text-stone-500 hover:text-stone-300 hover:bg-stone-900/50'}`}>
                 <Icon className="w-5 h-5" />
+                {tab === 'mail' && totalUnreadCount > 0 && (
+                   <span className="absolute top-3 right-1/4 w-2.5 h-2.5 bg-red-500 rounded-full border border-stone-900 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
+                )}
               </button>
             );
           })}
@@ -1006,7 +1035,6 @@ export default function App() {
             </>
           )}
 
-          {}
           {sidebarTab === 'roster' && (
             <div className="px-4 space-y-3">
               <h2 className="text-xs font-bold text-stone-500 uppercase tracking-widest mb-4 px-2">Known Travelers</h2>
@@ -1072,6 +1100,8 @@ export default function App() {
                   const isActiveMail = activeRoom === 'mail' && activeMailTarget?.id === char.id;
                   const avatarToUse = char.avatar || DEFAULT_AVATAR;
                   const nameToUse = char.name || 'Unknown Traveler';
+                  const hasUnread = mails.some(m => m.targetId === profile.id && m.senderId === char.id && !m.isRead);
+
                   return (
                     <button 
                       key={char.id} 
@@ -1080,8 +1110,13 @@ export default function App() {
                     >
                       <img src={avatarToUse} alt="avatar" className="w-8 h-8 rounded-md object-cover bg-stone-900 border border-stone-700 shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <div className="font-bold text-sm truncate">{nameToUse}</div>
-                        <div className="text-[10px] text-stone-500 uppercase tracking-widest truncate">Send Raven</div>
+                        <div className="font-bold text-sm truncate flex items-center gap-2">
+                           {nameToUse}
+                           {hasUnread && <span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.8)]"></span>}
+                        </div>
+                        <div className={`text-[10px] uppercase tracking-widest truncate ${hasUnread ? 'text-red-400 font-bold' : 'text-stone-500'}`}>
+                           {hasUnread ? 'New Raven!' : 'Send Raven'}
+                        </div>
                       </div>
                     </button>
                   );
@@ -1095,7 +1130,7 @@ export default function App() {
           )}
         </div>
 
-        {}
+        {/* Current User Profile Bottom */}
         <div className="p-4 border-t border-stone-800 bg-stone-900 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <img src={profile.avatar || DEFAULT_AVATAR} alt="avatar" className="w-10 h-10 object-cover bg-stone-950 rounded-md border border-stone-800 shadow-inner shrink-0" />
@@ -1117,7 +1152,6 @@ export default function App() {
         </div>
       </div>
 
-      {}
       {activeRoom === 'board' ? (
         <div className="flex-1 flex flex-col relative bg-stone-950 min-w-0 overflow-hidden select-none z-0">
           {/* Zoom Controls */}
@@ -1465,7 +1499,6 @@ export default function App() {
         </div>
       )}
 
-      {}
       {activeRoom !== 'board' && activeRoom !== 'mail' && (
         <div className="w-64 bg-stone-900 border-l border-stone-800 flex flex-col relative z-10 shadow-xl shrink-0 hidden lg:flex">
           <div className="p-4 border-b border-stone-800 bg-stone-950/50">
@@ -1499,7 +1532,6 @@ export default function App() {
         </div>
       )}
 
-      {}
       {interactUser && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-sm w-full relative flex flex-col max-h-[90vh] overflow-hidden">
@@ -1586,7 +1618,6 @@ export default function App() {
         </div>
       )}
 
-      {}
       {isCreatingRoom && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-sm w-full p-6 relative overflow-hidden">
@@ -1697,7 +1728,6 @@ export default function App() {
         </div>
       )}
 
-      {}
       {isAddingNotice && activeRoom === 'board' && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-lg w-full p-6 relative flex flex-col max-h-[90vh]">
@@ -1741,7 +1771,6 @@ export default function App() {
         </div>
       )}
 
-      {}
       {roomToDelete && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-red-900/50 rounded-xl shadow-2xl max-w-sm w-full p-6 relative overflow-hidden">
@@ -1757,7 +1786,6 @@ export default function App() {
         </div>
       )}
 
-      {}
       {focusedNotice && (
         <div className="absolute inset-0 bg-stone-950/90 backdrop-blur-md z-[70] flex items-center justify-center p-4" onPointerDown={() => setFocusedNotice(null)}>
           <div className="bg-[#fdf5e6] border border-[#d4c4a8] rounded shadow-2xl max-w-3xl w-full p-8 md:p-12 relative flex flex-col max-h-[90vh]" onPointerDown={e => e.stopPropagation()}>
