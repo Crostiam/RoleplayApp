@@ -91,6 +91,7 @@ interface Notice {
   x?: number;
   y?: number;
   scale?: number;
+  taggedUsers?: {id: string, name: string}[];
 }
 
 interface MailMessage {
@@ -162,6 +163,7 @@ export default function App() {
   const [newNoticeTitle, setNewNoticeTitle] = useState('');
   const [newNoticeContent, setNewNoticeContent] = useState('');
   const [attachedNoticeImage, setAttachedNoticeImage] = useState<string | null>(null);
+  const [newNoticeTags, setNewNoticeTags] = useState<{id: string, name: string}[]>([]);
   const [focusedNotice, setFocusedNotice] = useState<Notice | null>(null);
   const [editingNoticeId, setEditingNoticeId] = useState<string | null>(null);
   
@@ -487,7 +489,7 @@ export default function App() {
 
   const usersInRoom = presence.filter(p => p.currentRoom === activeRoom && (currentTime - p.lastActive < 120000));
 
-  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
     for (let i = 0; i < items.length; i++) {
@@ -664,7 +666,8 @@ export default function App() {
         await updateDoc(docRef, { 
           title: newNoticeTitle || 'Public Decree', 
           content: newNoticeContent, 
-          imageUrl: attachedNoticeImage
+          imageUrl: attachedNoticeImage,
+          taggedUsers: newNoticeTags
         });
       } else {
         const boardRef = collection(db, 'artifacts', appId, 'public', 'data', 'board');
@@ -674,10 +677,11 @@ export default function App() {
         const initialY = (screenCenterY - boardTransform.y) / boardTransform.scale;
         await addDoc(boardRef, { 
           title: newNoticeTitle || 'Public Decree', content: newNoticeContent, imageUrl: attachedNoticeImage,
-          timestamp: Date.now(), author: profile.name, authorId: profile.id, x: initialX, y: initialY
+          timestamp: Date.now(), author: profile.name, authorId: profile.id, x: initialX, y: initialY,
+          taggedUsers: newNoticeTags
         });
       }
-      setIsAddingNotice(false); setNewNoticeTitle(''); setNewNoticeContent(''); setAttachedNoticeImage(null); setEditingNoticeId(null);
+      setIsAddingNotice(false); setNewNoticeTitle(''); setNewNoticeContent(''); setAttachedNoticeImage(null); setEditingNoticeId(null); setNewNoticeTags([]);
     } catch (err) { console.error("Error saving board:", err); }
   };
 
@@ -692,7 +696,7 @@ export default function App() {
     catch (err) { console.error("Error scaling notice:", err); }
   };
 
-  const handleMailPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+  const handleMailPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
     for (let i = 0; i < items.length; i++) {
@@ -723,8 +727,8 @@ export default function App() {
     }
   };
 
-  const handleSendMail = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendMail = async (e?: React.FormEvent | React.KeyboardEvent) => {
+    if (e) e.preventDefault();
     if (!activeMailTarget || (!mailContent.trim() && !attachedMailImage) || activeMailTarget.id === 'ALL') return;
     const lastSent = parseInt(localStorage.getItem('medieval_last_mail_time') || '0');
     const now = Date.now();
@@ -789,8 +793,8 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendMessage = async (e?: React.FormEvent | React.KeyboardEvent) => {
+    if (e) e.preventDefault();
     if (!newMessage.trim() && !attachedImage) return;
 
     let msgText = newMessage.trim();
@@ -1216,7 +1220,7 @@ export default function App() {
                                <button onClick={() => handleScaleNotice(notice, 0.2)} className="p-1.5 text-stone-400 hover:text-amber-400 hover:bg-stone-800 rounded transition-colors" title="Increase Size"><Plus className="w-4 h-4" /></button>
                                <button onClick={() => handleScaleNotice(notice, -0.2)} className="p-1.5 text-stone-400 hover:text-amber-400 hover:bg-stone-800 rounded transition-colors" title="Decrease Size"><Minus className="w-4 h-4" /></button>
                                <div className="w-px bg-stone-700 mx-1 my-1"></div>
-                               <button onClick={() => { setEditingNoticeId(notice.id); setNewNoticeTitle(notice.title); setNewNoticeContent(notice.content); setAttachedNoticeImage(notice.imageUrl || null); setIsAddingNotice(true); }} className="p-1.5 text-stone-400 hover:text-blue-400 hover:bg-stone-800 rounded transition-colors" title="Edit Decree"><Edit className="w-4 h-4" /></button>
+                               <button onClick={() => { setEditingNoticeId(notice.id); setNewNoticeTitle(notice.title); setNewNoticeContent(notice.content); setAttachedNoticeImage(notice.imageUrl || null); setNewNoticeTags(notice.taggedUsers || []); setIsAddingNotice(true); }} className="p-1.5 text-stone-400 hover:text-blue-400 hover:bg-stone-800 rounded transition-colors" title="Edit Decree"><Edit className="w-4 h-4" /></button>
                                <button onClick={() => handleDeleteNotice(notice.id)} className="p-1.5 text-stone-400 hover:text-red-500 hover:bg-stone-800 rounded transition-colors" title="Burn Decree"><Trash2 className="w-4 h-4" /></button>
                                <div className="w-px bg-stone-700 mx-1 my-1"></div>
                              </>
@@ -1226,6 +1230,17 @@ export default function App() {
                        
                        <h3 className="font-bold text-xl mb-3 text-stone-800 font-serif border-b border-stone-300 pb-2 pointer-events-none">{notice.title}</h3>
                        {notice.imageUrl && <img src={notice.imageUrl} className="w-full h-auto mb-4 rounded shadow-sm border border-stone-300 pointer-events-none" draggable="false" alt="Notice Attachment" />}
+                       
+                       {notice.taggedUsers && notice.taggedUsers.length > 0 && (
+                         <div className="mb-4 flex flex-wrap gap-1 pointer-events-none">
+                           {notice.taggedUsers.map(tag => (
+                             <span key={tag.id} className="bg-amber-900/20 text-amber-800 border border-amber-900/30 px-2 py-0.5 rounded-full text-xs font-bold font-sans">
+                               @{tag.name}
+                             </span>
+                           ))}
+                         </div>
+                       )}
+
                        <div className="whitespace-pre-wrap font-serif text-sm leading-relaxed text-stone-800 mb-6 pointer-events-none">{notice.content}</div>
                        
                        <div className="mt-auto pt-3 border-t border-stone-300 text-[10px] uppercase tracking-widest text-stone-500 flex justify-between items-center font-sans pointer-events-none">
@@ -1299,7 +1314,7 @@ export default function App() {
                         )}
                       </div>
                       <div className={`px-5 py-3 rounded-2xl shadow-lg relative font-serif italic ${isMe ? 'bg-indigo-950/40 border border-indigo-800/50 text-indigo-100 rounded-tr-none' : 'bg-stone-900 border border-stone-700 text-stone-300 rounded-tl-none'}`}>
-                        {msg.content && <div>"{msg.content}"</div>}
+                        {msg.content && <div className="whitespace-pre-wrap">"{msg.content}"</div>}
                         {msg.imageUrl && <img src={msg.imageUrl} alt="attached raven" className="mt-2 max-w-full rounded-lg border border-indigo-500/30 shadow-sm" />}
                       </div>
                     </div>
@@ -1321,7 +1336,7 @@ export default function App() {
                   <span className="text-xl font-mono font-bold bg-red-900/50 px-3 py-1 rounded-lg">{mailCooldown}s</span>
                 </div>
               ) : (
-                <form onSubmit={handleSendMail} className="max-w-4xl mx-auto relative flex flex-col gap-2 w-full">
+                <form className="max-w-4xl mx-auto relative flex flex-col gap-2 w-full">
                   {attachedMailImage && (
                     <div className="relative self-start mb-2 ml-2">
                       <img src={attachedMailImage} alt="attached preview" className="h-24 w-auto rounded-lg border-2 border-indigo-900/50 shadow-md object-contain bg-stone-950" />
@@ -1330,12 +1345,23 @@ export default function App() {
                       </button>
                     </div>
                   )}
-                  <div className="relative flex items-center w-full">
-                    <input type="text" value={mailContent} onChange={(e) => setMailContent(e.target.value)} onPaste={handleMailPaste}
-                      placeholder={`Pen a letter to ${activeMailTarget.name}... (Ctrl+V to paste image)`}
-                      className="w-full bg-stone-900 border border-indigo-900/50 text-stone-200 py-4 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner placeholder-stone-600 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600/50" />
-                    <button type="submit" disabled={!mailContent.trim() && !attachedMailImage}
-                      className="absolute right-2 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md bg-indigo-700 hover:bg-indigo-600 disabled:bg-stone-800 disabled:text-stone-600 text-indigo-100 disabled:shadow-none">
+                  <div className="relative flex items-end w-full gap-2">
+                    <textarea 
+                      value={mailContent} 
+                      onChange={(e) => setMailContent(e.target.value)} 
+                      onPaste={handleMailPaste}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (mailContent.trim() || attachedMailImage) handleSendMail(e);
+                        }
+                      }}
+                      placeholder={`Pen a letter to ${activeMailTarget.name}... (Shift+Enter for new line, Ctrl+V to paste image)`}
+                      className="w-full bg-stone-900 border border-indigo-900/50 text-stone-200 py-3 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner placeholder-stone-600 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600/50 resize-none min-h-[52px] max-h-32 custom-scrollbar" 
+                      rows={1}
+                    />
+                    <button type="button" onClick={handleSendMail} disabled={!mailContent.trim() && !attachedMailImage}
+                      className="absolute right-2 bottom-1.5 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md bg-indigo-700 hover:bg-indigo-600 disabled:bg-stone-800 disabled:text-stone-600 text-indigo-100 disabled:shadow-none">
                       <Feather className="w-5 h-5" />
                     </button>
                   </div>
@@ -1424,7 +1450,7 @@ export default function App() {
                       )}
                     </div>
                     <div className={`px-5 py-3 rounded-2xl shadow-lg relative bg-fuchsia-950/40 border border-fuchsia-800/50 text-fuchsia-100 italic ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
-                      "{msg.text}"
+                      <div className="whitespace-pre-wrap">"{msg.text}"</div>
                     </div>
                   </div>
                 );
@@ -1449,7 +1475,7 @@ export default function App() {
                     )}
                   </div>
                   <div className={`px-5 py-3 rounded-2xl shadow-lg relative ${isAdminMsg ? 'bg-amber-900/40 border border-amber-700/50 text-amber-100 rounded-tl-none' : isMe ? 'bg-stone-700 border border-stone-600 text-stone-100 rounded-tr-none' : 'bg-stone-800 border border-stone-700 text-stone-200 rounded-tl-none'}`}>
-                    {msg.text && <div>{msg.text}</div>}
+                    {msg.text && <div className="whitespace-pre-wrap">{msg.text}</div>}
                     {msg.imageUrl && <img src={msg.imageUrl} alt="attached" className="mt-2 max-w-full rounded-lg border border-stone-600/50 shadow-sm" />}
                   </div>
                 </div>
@@ -1460,7 +1486,7 @@ export default function App() {
 
           {/* Input Area */}
           <div className="p-4 md:p-6 bg-stone-900 border-t border-stone-800 shrink-0">
-            <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto relative flex flex-col gap-2">
+            <form className="max-w-4xl mx-auto relative flex flex-col gap-2">
               {whisperTarget && (
                 <div className="flex items-center gap-2 text-sm bg-fuchsia-950/50 text-fuchsia-300 px-4 py-2 rounded-lg border border-fuchsia-900/50 w-max self-start">
                   <span>Whispering to <strong>{whisperTarget.name}</strong></span>
@@ -1477,20 +1503,31 @@ export default function App() {
                   </button>
                 </div>
               )}
-              <div className="relative flex items-center w-full gap-2">
+              <div className="relative flex items-end w-full gap-2">
                 <button type="button" onClick={() => setIsActionMessage(!isActionMessage)} title="Toggle Roleplay Action (/me)"
-                   className={`p-3 rounded-xl transition-colors shadow-inner flex shrink-0 items-center justify-center ${isActionMessage ? 'bg-indigo-900/50 text-indigo-300 border border-indigo-500' : 'bg-stone-950 text-stone-500 border border-stone-700 hover:text-indigo-400'}`}>
+                   className={`p-3 rounded-xl transition-colors shadow-inner flex shrink-0 items-center justify-center mb-1.5 ${isActionMessage ? 'bg-indigo-900/50 text-indigo-300 border border-indigo-500' : 'bg-stone-950 text-stone-500 border border-stone-700 hover:text-indigo-400'}`}>
                    <Sparkles className="w-5 h-5" />
                 </button>
                 <button type="button" onClick={() => setIsPinningNextMessage(!isPinningNextMessage)} title="Pin Message Permanently"
-                   className={`p-3 rounded-xl transition-colors shadow-inner flex shrink-0 items-center justify-center ${isPinningNextMessage ? 'bg-amber-600 text-stone-900 border border-amber-500' : 'bg-stone-950 text-stone-500 border border-stone-700 hover:text-amber-500'}`}>
+                   className={`p-3 rounded-xl transition-colors shadow-inner flex shrink-0 items-center justify-center mb-1.5 ${isPinningNextMessage ? 'bg-amber-600 text-stone-900 border border-amber-500' : 'bg-stone-950 text-stone-500 border border-stone-700 hover:text-amber-500'}`}>
                    <Pin className="w-5 h-5" />
                 </button>
-                <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onPaste={handlePaste}
-                  placeholder={whisperTarget ? `Secretly tell ${whisperTarget.name}...` : isActionMessage ? `Roleplay an action (e.g. sits by the fire...)` : `Speak in ${activeRoom === 'main-town' ? 'Main Town' : rooms.find(r => r.id === activeRoom)?.name || 'the realm'}... (Ctrl+V to paste image)`}
-                  className={`w-full bg-stone-950 border text-stone-200 py-4 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner ${whisperTarget ? 'border-fuchsia-800 placeholder-fuchsia-800/50 focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500/50' : isActionMessage ? 'border-indigo-800 placeholder-indigo-800/50 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 text-indigo-200 italic' : 'border-stone-700 placeholder-stone-600 focus:border-amber-600 focus:ring-1 focus:ring-amber-600/50'}`} />
-                <button type="submit" disabled={(!newMessage.trim() && !attachedImage) || !activeRoom}
-                  className={`absolute right-2 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md disabled:shadow-none ${whisperTarget ? 'bg-fuchsia-800 hover:bg-fuchsia-700 disabled:bg-stone-800 disabled:text-stone-600 text-fuchsia-100' : isActionMessage ? 'bg-indigo-700 hover:bg-indigo-600 disabled:bg-stone-800 disabled:text-stone-600 text-indigo-100' : 'bg-amber-700 hover:bg-amber-600 disabled:bg-stone-800 disabled:text-stone-600 text-amber-100'}`}>
+                <textarea 
+                  value={newMessage} 
+                  onChange={(e) => setNewMessage(e.target.value)} 
+                  onPaste={handlePaste}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if ((newMessage.trim() || attachedImage) && activeRoom) handleSendMessage(e);
+                    }
+                  }}
+                  placeholder={whisperTarget ? `Secretly tell ${whisperTarget.name}... (Shift+Enter for new line)` : isActionMessage ? `Roleplay an action (e.g. sits by the fire...)` : `Speak in ${activeRoom === 'main-town' ? 'Main Town' : rooms.find(r => r.id === activeRoom)?.name || 'the realm'}... (Ctrl+V to paste image, Shift+Enter for new line)`}
+                  className={`w-full bg-stone-950 border text-stone-200 py-3 pl-6 pr-16 rounded-xl outline-none transition-all shadow-inner resize-none min-h-[52px] max-h-32 custom-scrollbar ${whisperTarget ? 'border-fuchsia-800 placeholder-fuchsia-800/50 focus:border-fuchsia-500 focus:ring-1 focus:ring-fuchsia-500/50' : isActionMessage ? 'border-indigo-800 placeholder-indigo-800/50 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 text-indigo-200 italic' : 'border-stone-700 placeholder-stone-600 focus:border-amber-600 focus:ring-1 focus:ring-amber-600/50'}`} 
+                  rows={1}
+                />
+                <button type="button" onClick={handleSendMessage} disabled={(!newMessage.trim() && !attachedImage) || !activeRoom}
+                  className={`absolute right-2 bottom-1.5 p-3 rounded-lg transition-colors flex items-center justify-center shadow-md disabled:shadow-none ${whisperTarget ? 'bg-fuchsia-800 hover:bg-fuchsia-700 disabled:bg-stone-800 disabled:text-stone-600 text-fuchsia-100' : isActionMessage ? 'bg-indigo-700 hover:bg-indigo-600 disabled:bg-stone-800 disabled:text-stone-600 text-indigo-100' : 'bg-amber-700 hover:bg-amber-600 disabled:bg-stone-800 disabled:text-stone-600 text-amber-100'}`}>
                   <Send className="w-5 h-5" />
                 </button>
               </div>
@@ -1731,7 +1768,7 @@ export default function App() {
       {isAddingNotice && activeRoom === 'board' && (
         <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-lg w-full p-6 relative flex flex-col max-h-[90vh]">
-             <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); setNewNoticeTitle(''); setNewNoticeContent(''); setEditingNoticeId(null); }} className="absolute top-4 right-4 text-stone-400 hover:text-white"><X className="w-5 h-5" /></button>
+             <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); setNewNoticeTitle(''); setNewNoticeContent(''); setEditingNoticeId(null); setNewNoticeTags([]); }} className="absolute top-4 right-4 text-stone-400 hover:text-white"><X className="w-5 h-5" /></button>
              <h3 className="text-2xl font-bold text-amber-500 mb-6 flex items-center gap-2 border-b border-stone-800 pb-4"><Scroll className="w-6 h-6" /> {editingNoticeId ? 'Edit Public Decree' : 'Post Public Decree'}</h3>
              
              <div className="space-y-5 overflow-y-auto flex-1 min-h-0 pr-2 custom-scrollbar">
@@ -1750,6 +1787,39 @@ export default function App() {
                      className="w-full h-32 bg-stone-950 border border-stone-700 p-3 rounded-lg text-stone-200 focus:border-amber-500 outline-none resize-none shadow-inner leading-relaxed" 
                      placeholder="Write the official decree..." />
                 </div>
+                
+                <div>
+                  <label className="block text-sm text-stone-400 mb-1">Tag Subjects (Optional)</label>
+                  <div className="flex flex-col gap-2">
+                    <select 
+                      onChange={(e) => {
+                        const char = characters.find(c => c.id === e.target.value);
+                        if (char && !newNoticeTags.some(t => t.id === char.id)) {
+                          setNewNoticeTags(prev => [...prev, {id: char.id, name: char.name}]);
+                        }
+                        e.target.value = '';
+                      }}
+                      className="w-full bg-stone-950 border border-stone-700 p-2 rounded-lg text-stone-200 focus:border-amber-500 outline-none shadow-inner"
+                      defaultValue=""
+                    >
+                      <option value="" disabled>Select a traveler...</option>
+                      {characters.filter(c => !newNoticeTags.some(t => t.id === c.id)).map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    {newNoticeTags.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {newNoticeTags.map(tag => (
+                          <span key={tag.id} className="bg-amber-900/30 text-amber-500 border border-amber-900/50 px-2 py-1 rounded text-xs flex items-center gap-1">
+                            {tag.name}
+                            <button onClick={() => setNewNoticeTags(prev => prev.filter(t => t.id !== tag.id))} className="hover:text-amber-300 ml-1"><X className="w-3 h-3" /></button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {attachedNoticeImage && (
                   <div>
                      <label className="block text-sm text-stone-400 mb-1">Attached Illustration</label>
@@ -1764,7 +1834,7 @@ export default function App() {
              </div>
              
              <div className="flex gap-3 pt-6 border-t border-stone-800 shrink-0 mt-2">
-                <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); setNewNoticeTitle(''); setNewNoticeContent(''); setEditingNoticeId(null); }} className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg transition-colors border border-stone-600">Cancel</button>
+                <button onClick={() => { setIsAddingNotice(false); setAttachedNoticeImage(null); setNewNoticeTitle(''); setNewNoticeContent(''); setEditingNoticeId(null); setNewNoticeTags([]); }} className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg transition-colors border border-stone-600">Cancel</button>
                 <button onClick={handleAddNotice} disabled={!newNoticeContent.trim() && !attachedNoticeImage} className="flex-1 py-3 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-amber-100 font-bold rounded-lg transition-colors shadow-lg uppercase tracking-wider">{editingNoticeId ? 'Update Decree' : 'Pin to Board'}</button>
              </div>
           </div>
@@ -1796,6 +1866,17 @@ export default function App() {
                 
                 {focusedNotice.imageUrl && (
                   <img src={focusedNotice.imageUrl} alt="Notice Attachment" className="w-full h-auto mb-8 rounded border border-stone-300 shadow-md" />
+                )}
+                
+                {focusedNotice.taggedUsers && focusedNotice.taggedUsers.length > 0 && (
+                  <div className="mb-4 flex flex-wrap gap-2 pointer-events-none">
+                    <span className="text-stone-500 text-sm font-sans font-bold uppercase tracking-wider mr-2">Subjects:</span>
+                    {focusedNotice.taggedUsers.map(tag => (
+                      <span key={tag.id} className="bg-amber-900/20 text-amber-800 border border-amber-900/30 px-2 py-0.5 rounded text-xs font-bold font-sans">
+                        @{tag.name}
+                      </span>
+                    ))}
+                  </div>
                 )}
                 
                 <div className="whitespace-pre-wrap font-serif text-xl leading-relaxed text-stone-800 mb-8">{focusedNotice.content}</div>
